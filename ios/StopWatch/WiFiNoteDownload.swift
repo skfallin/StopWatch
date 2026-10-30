@@ -20,7 +20,7 @@ final class WiFiNoteDownload: NSObject, URLSessionDelegate, URLSessionTaskDelega
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize
         try Self.requireSuccess(response)
         guard size == expectedBytes else {
-            throw CompanionError.message("Trasferimento Wi-Fi incompleto: riprovo via Bluetooth.")
+            throw CompanionError.message(String(localized: "Trasferimento Wi-Fi incompleto: riprovo via Bluetooth.", bundle: AppLocalization.bundle))
         }
         return try Data(contentsOf: file)
     }
@@ -36,8 +36,8 @@ final class WiFiNoteDownload: NSObject, URLSessionDelegate, URLSessionTaskDelega
     }
 
     static func requireSuccess(_ response: URLResponse) throws {
-        guard let http=response as? HTTPURLResponse else { throw CompanionError.message("Risposta Wi-Fi non valida.") }
-        guard http.statusCode==200 else { throw CompanionError.message("Trasferimento Wi-Fi: HTTP \(http.statusCode).") }
+        guard let http=response as? HTTPURLResponse else { throw CompanionError.message(String(localized: "Risposta Wi-Fi non valida.", bundle: AppLocalization.bundle)) }
+        guard http.statusCode==200 else { throw CompanionError.message(String(localized: "Trasferimento Wi-Fi: HTTP \(http.statusCode).", bundle: AppLocalization.bundle)) }
     }
 
     static func retryableUploadError(_ error: Error) -> Bool {

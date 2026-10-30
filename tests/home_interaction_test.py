@@ -14,6 +14,7 @@ condition = source[start:source.index(") {", start)]
 harness = r'''
 #include "policy.h"
 #include "home_state.h"
+#include "light_control.h"
 #include "ui_layout.h"
 #include <cassert>
 #include <iostream>
@@ -28,14 +29,17 @@ struct Settings {
 struct Backend {
     bool occupied=false,accepts=true;int reads=0,actions=0;
     bool busy() const { return occupied; }
-    bool requestFavorite(size_t,bool action) {
+    int brightness=-1;
+    bool requestFavorite(size_t,bool action,int level=-1) {
+        brightness=level;
         if(!accepts) return false;
         occupied=true;if(action) ++actions;else ++reads;return true;
     }
-    bool request(const Settings&,size_t index,bool action) { return requestFavorite(index,action); }
+    bool request(const Settings&,size_t index,bool action,int level=-1) { return requestFavorite(index,action,level); }
 } mqtt,home;
 struct { bool occupied=false;bool busy() const { return occupied; } } notes;
-bool homeReady=true,dirty=false,fresh=true,homeVisible=true,homeOnline=true;
+bool homeReady=true,dirty=false,fresh=true,homeVisible=true,homeOnline=true,adjustOption=false,dimmable=true;
+casa::LightLevel lightDraft;size_t lightFavorite=0;String lightEntity="light.camera";
 size_t favorite=0;
 int homeRoute=2;
 uint32_t now=1000,lastHaRead=0,transitionAt=0;
@@ -47,9 +51,14 @@ String notice;
 uint32_t millis() { return now; }
 void toast(const String& value) { notice=value; }
 bool favoriteFresh() { return fresh; }
+bool favoriteCanDim() { return fresh && dimmable; }
+void sound(sfx::Cue) {}
+void openLight() { screen=Screen::Light; }
 void changeScreen(Screen value) { screen=value;lastHaRead=now-6000; }
 '''
-harness += execute + "\nvoid confirm() { switch(screen) {\n" + confirm + "default:break;\n} }\n"
+apply_start=source.index("bool applyLight() {")
+apply=source[apply_start:source.index("\n}",apply_start)+2]
+harness += execute + "\n" + apply + "\nvoid confirm(bool fromButton=false) { switch(screen) {\n" + confirm + "default:break;\n} }\n"
 harness += "bool pollDue() { return " + condition + "; }\n"
 harness += r'''
 int main() {
@@ -79,6 +88,15 @@ int main() {
     assert(!pollDue());now=7500;assert(pollDue());
     notes.occupied=true;assert(!pollDue());notes.occupied=false;
     homeOnline=false;assert(!pollDue());
+    notes.occupied=false;homeOnline=true;settings.favorites[0].entity="light.camera";settings.favoritesMqtt=true;
+    mqtt.occupied=false;homeCommand.clear();fresh=true;lightDraft.begin(60);
+    screen=Screen::Light;confirm(true);assert(lightDraft.value==65 && !mqtt.occupied);
+    confirm(false);assert(mqtt.brightness==65 && homeCommand.pending() && screen==Screen::HomeAssistant);
+    assert(!homeCommand.observe(0,"on",20));assert(homeCommand.observe(0,"on",65));
+    mqtt.occupied=false;lightEntity="light.other";assert(!applyLight() && !mqtt.occupied);
+    lightEntity="light.camera";dimmable=false;assert(!applyLight() && !mqtt.occupied);dimmable=true;
+    fresh=false;assert(!applyLight() && !mqtt.occupied);fresh=true;
+    lightDraft.value=0;assert(applyLight() && mqtt.brightness==0 && homeCommand.observe(0,"off"));
     std::cout<<"OK: conferma conservata durante letture, nessuna azione su dati vecchi, pausa tra aggiornamenti\n";
 }
 '''

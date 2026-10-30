@@ -2,6 +2,20 @@ import XCTest
 @testable import StopWatch
 
 final class HomeRelayTests: XCTestCase {
+    func testBrightnessCommandsAreBoundedLightActions() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        for level in [0, 1, 62, 100] {
+            let request = RelayEvent(kind: .favorite, payload: "{\"request\":12,\"entity\":\"light.camera\",\"action\":true,\"brightness\":\(level),\"sent_at\":2000000000}", ageMS: 0)
+            XCTAssertEqual(try request.validated(now: now).brightness, level)
+            XCTAssertThrowsError(try request.validated(now: now.addingTimeInterval(6)))
+        }
+        for pair in [("light.camera", "true", "-1"), ("light.camera", "true", "101"),
+                     ("light.camera", "false", "50"), ("switch.presa", "true", "50"),
+                     ("light.camera", "true", "true"), ("light.camera", "true", "1.5")] {
+            let request = RelayEvent(kind: .favorite, payload: "{\"request\":12,\"entity\":\"\(pair.0)\",\"action\":\(pair.1),\"brightness\":\(pair.2),\"sent_at\":2000000000}", ageMS: 0)
+            XCTAssertThrowsError(try request.validated(now: now))
+        }
+    }
     private let device = "stopwatch_ec6244858428"
     private let account = RelayAccount(url: "https://casa.example.it", token: "test-token")
     private func event(_ payload: String, kind: RelayKind = .music, age: UInt32 = 0) -> RelayEvent {

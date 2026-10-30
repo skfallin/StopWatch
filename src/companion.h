@@ -10,12 +10,13 @@
 #include "note_transfer.h"
 #include "badge.h"
 #include "phone_relay.h"
+#include "usb_control.h"
 
 class Companion : private BLEServerCallbacks, private BLECharacteristicCallbacks, private BLESecurityCallbacks {
 public:
-    Companion(Settings& settings, VoiceNotes& notes, Badge& badge, bool (*canSave)(), void (*onSaved)(),
+    Companion(Settings& settings, VoiceNotes& notes, Badge& badge, UsbControl& usb, bool (*canSave)(), void (*onSaved)(),
               bool (*output)(const String&), void (*extraStatus)(JsonObject))
-        : settings_(settings), notes_(notes), badge_(badge), noteTransfer_(badge), canSave_(canSave), onSaved_(onSaved),
+        : settings_(settings), notes_(notes), badge_(badge), usb_(usb), noteTransfer_(badge), canSave_(canSave), onSaved_(onSaved),
           output_(output), extraStatus_(extraStatus) {}
     bool begin();
     void update();
@@ -37,6 +38,7 @@ public:
 
 private:
     struct Packet { uint32_t session; uint16_t size; uint8_t bytes[512]; };
+    struct MousePacket { uint32_t session; uint8_t bytes[8]; };
     void onConnect(BLEServer*, ble_gap_conn_desc*) override;
     void onDisconnect(BLEServer*, ble_gap_conn_desc*) override;
     void onWrite(BLECharacteristic*, ble_gap_conn_desc*) override;
@@ -54,6 +56,7 @@ private:
     Settings& settings_;
     VoiceNotes& notes_;
     Badge& badge_;
+    UsbControl& usb_;
     NoteTransfer noteTransfer_;
     bool (*canSave_)();
     void (*onSaved_)();
@@ -61,7 +64,9 @@ private:
     void (*extraStatus_)(JsonObject);
     BLEServer* server_ = nullptr;
     BLECharacteristic* tx_ = nullptr;
+    BLECharacteristic* mouseRx_ = nullptr;
     QueueHandle_t packets_ = nullptr;
+    QueueHandle_t mousePackets_ = nullptr;
     String name_, response_;
     BleLine line_;
     phone::Relay relay_;

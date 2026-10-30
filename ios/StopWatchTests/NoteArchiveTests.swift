@@ -28,6 +28,29 @@ final class NoteArchiveTests: XCTestCase {
         XCTAssertNil(otherDevice.transcript(for: note))
     }
 
+    func testTitlesSurviveReopeningWithoutRenamingOrChangingAudio() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let archive = NoteArchive(deviceID: id, root: root)
+        let note = VoiceNote(name: "note-0123456789abcdef.wav", bytes: 64, seconds: 0.000625)
+        XCTAssertThrowsError(try archive.saveTitle("Idea", for: note))
+        let url = try archive.saveAudio(audio(), for: note)
+        try archive.saveTranscript("Un'idea da sviluppare", for: note)
+        try archive.saveTitle("  Caffè domani  ", for: note)
+        XCTAssertEqual(archive.title(for: note), "Caffè domani")
+        let reopened = NoteArchive(deviceID: id, root: root)
+        XCTAssertEqual(reopened.title(for: note), "Caffè domani")
+        XCTAssertThrowsError(try archive.saveTitle(String(repeating: "a", count: 121), for: note))
+        XCTAssertThrowsError(try archive.saveTitle("Due\nrighe", for: note))
+        XCTAssertEqual(archive.title(for: note), "Caffè domani")
+        XCTAssertEqual(try Data(contentsOf: url), audio())
+        XCTAssertEqual(archive.transcript(for: note), "Un'idea da sviluppare")
+        XCTAssertEqual(try archive.notes(), [note])
+        try archive.saveTitle("", for: note)
+        XCTAssertNil(archive.title(for: note))
+    }
+
     func testInvalidAudioAndEmptyRecognitionPreserveExistingFiles() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

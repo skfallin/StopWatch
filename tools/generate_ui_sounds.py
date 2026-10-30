@@ -1,4 +1,4 @@
-"""Build normalized UI SFX, the filesystem archive and its small firmware catalog."""
+"""Build the selected Microclick sounds, filesystem archive and firmware catalog."""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import json
@@ -10,61 +10,53 @@ import struct
 import zlib
 
 root = Path(__file__).resolve().parents[1]
-source = root / "assets/sounds/uisfx-0.4.0"
+source = root / "assets/sounds/kenney-interface-1.0"
 manifest = json.loads((source / "manifest.json").read_text())
-assert manifest["version"] == "0.4.0" and manifest["license"]["audio"] == "CC0-1.0"
-packs = [p["name"] for p in manifest["packs"]]
-cues = {"Select": "select", "Open": "open", "Back": "back", "Success": "success",
-        "Error": "error", "Warning": "warning", "Complete": "complete", "Volume": "volume-change"}
+assert manifest["version"] == "1.0" and manifest["license"] == "CC0-1.0"
+packs = [manifest["pack"]]
+cues = manifest["cues"]
+assert list(cues) == ["Select", "Open", "Back", "Success", "Error", "Warning", "Complete", "Volume"]
 catalog = (root / "include/ui_sounds.h").read_text()
 assert re.findall(r'"([a-z]+)"', catalog.split('packIds = {')[1].split('};')[0]) == ['off'] + packs
-assert len(packs) == 12
-assets = {(a["pack"], a["cue"]): a for a in manifest["assets"]}
 
-def rms(pcm, format):
-    samples = [v[0] for v in struct.iter_unpack(format, pcm)]
+def rms(samples):
     return math.sqrt(sum(v*v for v in samples) / len(samples))
-
-def process(pcm, filters, format):
-    return subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "f32le",
-                           "-ar", "16000", "-ac", "1", "-i", "pipe:0", "-af", filters,
-                           "-f", format, "pipe:1"], input=pcm, capture_output=True, check=True).stdout
 
 def convert(key):
     pack, cue = key
-    asset = assets[key]
-    assert not asset["loop"] and asset["channels"] in (1, 2)
-    path = source / asset["files"]["ogg"]["path"]
-    assert path.stat().st_size == asset["files"]["ogg"]["bytes"]
+    filename = cues[cue]
+    assert Path(filename).name == filename and filename.endswith('.ogg')
+    path = source / filename
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == manifest["sha256"][filename]
     original = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(path),
-                               "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"],
+                               "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"],
                               capture_output=True, check=True).stdout
-    assert original and len(original) % 4 == 0
-    level = rms(original, '<f')
-    assert math.isfinite(level) and level > 0
-    # Compression is offline; the watch only decompresses the final PCM.
-    compressed = process(original, f"volume={10**(-14/20)/level}:precision=double,"
-                         "acompressor=threshold=0.2:ratio=2:attack=1:release=25:knee=2.828:detection=peak", "f32le")
-    makeup = 10**(-9/20) / rms(compressed, '<f')
-    pcm = process(compressed, f"volume={makeup}:precision=double,"
-                  "alimiter=limit=0.94:attack=2:release=5:level=false:latency=true", "s16le")
-    assert len(pcm) == len(original) // 2, f"Duration changed: {pack}/{cue}"
-    assert 0 < len(pcm) <= 16000 * 2 * 3 and len(pcm) % 2 == 0
-    peak=max(abs(v[0]) for v in struct.iter_unpack('<h',pcm))
-    assert 0 < peak <= 30802, f"Peak headroom exceeded: {pack}/{cue}: {peak}"
-    level_db = 20*math.log10(rms(pcm, '<h')/32768)
-    assert -14 <= level_db <= -8.9, f"Inconsistent level: {pack}/{cue}: {level_db} dBFS"
+    assert original and len(original) % 2 == 0
+    samples = [v[0] for v in struct.iter_unpack('<h', original)]
+    peak = max(abs(v) for v in samples)
+    assert peak > 0
+    threshold = max(16, round(peak * .003))
+    audible = [i for i, value in enumerate(samples) if abs(value) > threshold]
+    assert audible
+    samples = samples[max(0, audible[0]-160):min(len(samples), audible[-1]+161)]
+    # Match the approved audition: trim padding and use gain only, preserving transients.
+    gain = min(32768*10**(-22/20)/rms(samples), 32768*10**(-8/20)/max(abs(v) for v in samples))
+    samples = [round(value * gain) for value in samples]
+    pcm = struct.pack(f'<{len(samples)}h', *samples)
+    assert 0 < len(pcm) <= 16000 * 2 * .5
+    assert 0 < max(abs(v) for v in samples) <= 13046, f"Peak headroom exceeded: {cue}"
+    level_db = 20*math.log10(rms(samples)/32768)
+    assert -30 <= level_db <= -21.9, f"Inconsistent level: {cue}: {level_db} dBFS"
     encoded = zlib.compress(pcm, 9)
     assert zlib.decompress(encoded) == pcm
     return pack, cue, encoded, len(pcm), level_db
 
-keys = [(pack, cue) for pack in packs for cue in cues.values()]
+keys = [(pack, cue) for pack in packs for cue in cues]
 with ThreadPoolExecutor(max_workers=4) as pool:
     sounds = list(pool.map(convert, keys))
 total = sum(len(s[2]) for s in sounds)
-assert total < 1500000, f"Sound budget exceeded: {total}"
-assert max(s[4] for s in sounds)-min(s[4] for s in sounds) <= 4, "Cue levels differ by more than 4 dB"
-output = ['// Generated by tools/generate_ui_sounds.py. UI SFX 0.4.0 audio: CC0-1.0.\n',
+assert total < 64000, f"Sound budget exceeded: {total}"
+output = ['// Generated by tools/generate_ui_sounds.py. Kenney Interface Sounds 1.0: CC0-1.0.\n',
           '#pragma once\n#include <Arduino.h>\n#include "ui_sounds.h"\nnamespace sfx::data {\n',
           'struct Asset { const uint8_t* bytes; uint32_t size, decodedBytes; };\n',
           'constexpr uint32_t sampleRate=16000;\n',
@@ -87,7 +79,7 @@ output.append('};\n}\n')
 (root / 'src/ui_sound_data.h').write_text(''.join(output))
 archive = b''.join(sound[2] for sound in sounds)
 (root / 'assets/sounds/ui-sounds.bin').write_bytes(archive)
-catalog = ['// Generated by tools/generate_ui_sounds.py. UI SFX audio: CC0-1.0.\n',
+catalog = ['// Generated by tools/generate_ui_sounds.py. Kenney Interface Sounds 1.0: CC0-1.0.\n',
            '#pragma once\n#include <cstdint>\n#include "ui_sounds.h"\nnamespace sfx::catalog {\n',
            'struct Asset { uint32_t offset, size, decodedBytes; };\n',
            'constexpr uint32_t sampleRate=16000;\n',
@@ -109,4 +101,6 @@ assert offset == len(archive)
 catalog.append('};\n}\n')
 (root / 'src/ui_sound_catalog.h').write_text(''.join(catalog))
 print(f'{len(packs)} packs, {len(sounds)} cues, {total} compressed bytes, {max(s[3] for s in sounds)} bytes PSRAM')
-print(f'RMS range: {min(s[4] for s in sounds):.1f} to {max(s[4] for s in sounds):.1f} dBFS; peak ceiling: 94%')
+print(f'RMS range: {min(s[4] for s in sounds):.1f} to {max(s[4] for s in sounds):.1f} dBFS; peak ceiling: -8 dBFS')
+for _, cue, encoded, size, level in sounds:
+    print(f'{cue}: {size/32:.1f} ms, {len(encoded)} bytes, {level:.1f} dBFS RMS')

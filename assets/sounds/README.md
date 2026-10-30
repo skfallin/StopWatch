@@ -1,26 +1,42 @@
-# UI SFX
+# Microclick
 
-Source: https://github.com/romainsimon/uisfx, npm `uisfx@0.4.0`.
-Audio license: CC0-1.0; original notice in `uisfx-0.4.0/LICENSE-AUDIO`.
+Il pacchetto quotidiano scelto dall’utente sostituisce i dodici stili UI SFX precedenti. Le sole scelte attive sono **Microclick** (`microclick`) e **Silenzioso** (`off`). I vecchi identificatori sono convertiti in Microclick sia dal firmware sia dal Companion; Silenzioso viene conservato. Gli altri valori della configurazione non cambiano.
 
-The original Ogg files for select, open, back, success, error, warning, complete and volume-change are included for all twelve packs. The manifest is the unmodified upstream catalog; unused audio is omitted.
+Sorgenti: [Kenney Interface Sounds 1.0](https://kenney.nl/assets/interface-sounds), licenza **CC0-1.0**. I sette Ogg originali, l’avviso originale `License.txt` e un manifest locale con SHA-256 e assegnazione agli eventi sono in `kenney-interface-1.0/`. Il manifest descrive questa selezione, non è un catalogo upstream. I vecchi sorgenti rimangono nello storico Git.
 
-Source archive: https://registry.npmjs.org/uisfx/-/uisfx-0.4.0.tgz
-Verified npm integrity: `sha512-W891N75C09cvpaNeChP+7BiP0Yp5VSbrIcRgZvzpFUT3o/2DxZqROmUcX50oxeyMnY4Hqxu4jEfjndVUpmheEQ==`.
+| Evento | Sorgente | Durata finale |
+|---|---|---:|
+| Tocco / selezione | `click_003.ogg` | 7,1 ms |
+| Apertura | `open_001.ogg` | 147,8 ms |
+| Indietro | `back_001.ogg` | 61,0 ms |
+| Conferma breve | `select_001.ogg` | 40,4 ms |
+| Errore / avviso | `error_001.ogg` | 161,7 ms |
+| Completamento | `confirmation_001.ogg` | 289,9 ms |
+| Anteprima volume | `click_001.ogg` | 51,3 ms |
 
-Run `python3 tools/generate_ui_sounds.py` with ffmpeg installed to regenerate `src/ui_sound_data.h`. It decodes mono 16 kHz float PCM, normalizes to -14 dBFS RMS, applies soft-knee 2:1 peak-detected compression (threshold 0.2, attack 1 ms, release 25 ms), then makeup toward -9 dBFS RMS and a 94% peak lookahead limiter (attack 2 ms, release 5 ms, automatic level disabled, latency compensated). The upstream `defaultVolume` is no longer applied: all cues use the same target. The limiter can reduce the average level of transient-heavy cues; the generator requires a final range within 4 dB.
+## Generazione
 
-The result is mono 16-bit PCM. Assertions check the original sample count, headroom, non-silence, RMS bounds, lossless zlib decompression and flash budget. Current output: 96 cues, 1,440,941 compressed bytes, RMS -12.5 to -9.0 dBFS, peaks no higher than 94%. The ESP32-S3 ROM decoder expands one cue into a reusable PSRAM buffer; dynamics processing consumes no runtime CPU on the watch. Original files, licenses and the generator are not flashed; partition sizes remain unchanged. Since firmware 0.8.1 the 1,440,941 compressed bytes live in `/ui-sounds.bin` on LittleFS, sharing storage with notes and Badge; only the generated catalog and SHA-256 remain in the normal firmware. These are digital checks; speaker distortion and perceived loudness still require listening on the physical device.
+Eseguire `.venv/bin/python tools/generate_ui_sounds.py` con ffmpeg disponibile. Il generatore controlla gli hash originali, decodifica mono PCM16 a 16 kHz, rimuove solo i bordi quasi silenziosi (soglia max di 16/32768 e 0,3% del picco, margine di 10 ms) e applica il guadagno dell’ascolto approvato: target **−22 dBFS RMS**, limite di picco **−8 dBFS**. I transitori più marcati rimangono sotto il target RMS per rispettare il picco: intervallo finale −29,9…−22,0 dBFS. Nessun compressore, riverbero o modifica di intonazione.
 
+Il risultato è compresso con zlib senza perdita. Sono verificati durata ≤ 500 ms, campioni non silenziosi, headroom, decompressione identica e budget di 64 KB. Output:
+
+- `assets/sounds/ui-sounds.bin`: **25.530 byte**, otto flussi nell’ordine dell’enum `Cue`.
+- `src/ui_sound_catalog.h`: offset, dimensioni, frequenza e SHA-256 completo, incluso nel firmware normale.
+- `src/ui_sound_data.h`: stessi flussi incorporati solo nell’installer temporaneo e nei test host.
+
+Il runtime mantiene 25.530 byte compressi in cache PSRAM e un buffer PCM da massimo 9.276 byte più il decoder. I tocchi non leggono il filesystem e non eseguono normalizzazione/compressione audio. Il volume Interazioni conserva la sua scala, indipendente da Volume note. Non disturbare e Silenzioso continuano a escludere i suoni. I campioni non interrompono la riproduzione delle note e vengono fermati prima della registrazione.
 
 ## Filesystem archive and migration
 
-`generate_ui_sounds.py` also writes `ui-sounds.bin` and `src/ui_sound_catalog.h`. The archive concatenates the existing zlib streams, in the unchanged pack/cue order. The catalog supplies offsets, compressed/decoded sizes and the full-file SHA-256. The legacy `src/ui_sound_data.h` is retained only for the one-time installer and host equivalence tests; normal firmware does not include it.
+Il file di sistema è `/ui-sounds.bin` su LittleFS. L’archivio precedente occupava **1.440.941 byte**: la sostituzione recupera **1.415.411 byte**, prima dell’overhead del filesystem, per note e Badge. Le partizioni rimangono invariate.
 
-`tools/build_sound_installer.py` builds the temporary `SFX_SEED_ARCHIVE` firmware using the same pinned project dependencies as the normal build. The installer writes a temporary archive, validates it and atomically renames it. It never formats LittleFS or removes user files. Keep that firmware until `[audio-store] pronto=1 cache=1`, then upload the normal firmware. Repeating the installer with the same valid archive does not rewrite the file.
+1. Compilare il firmware normale con `.venv/bin/pio run`.
+2. Compilare l’installer con `.venv/bin/python tools/build_sound_installer.py /tmp/stopwatch-microclick-installer`.
+3. Caricare l’installer seguendo il comando stampato dallo script; attendere `[audio-store] pronto=1 cache=1` nel log. Se la scelta salvata è Silenzioso, il log indica comunque `pronto=1` e il file è verificato.
+4. Caricare il firmware normale e verificare nuovamente il log audio.
 
-At runtime the whole file is checked once per boot, then only the selected compressed pack is cached in PSRAM (largest: 199,492 bytes), plus the existing PCM/decoder buffer. Switching packs replaces this cache. Playing cues within it requires no filesystem reads. Missing/corrupt archives use short fallback tones, honoring Silence, the configured interaction volume and ongoing note playback.
+L’installer scrive `/ui-sounds.tmp`, verifica SHA-256 e rinomina solo dopo il successo. Non formatta LittleFS né rimuove note, Badge, file Chiave o configurazione. Un errore di copia/rinomina conserva il vecchio file; ripetere la stessa installazione non riscrive un archivio già valido. Occorre spazio per il file temporaneo e la riserva di registrazione; se non basta, l’installer fallisce senza rimuovere dati. **Non usare `uploadfs` o erase per questa migrazione.**
 
-Archive initialization preserves the sound file on a mounted, healthy volume by deleting only recognized user notes, partial notes and Badge. Formatting an unmountable volume still requires physical confirmation and requires reinstalling sounds afterward.
+All’avvio il firmware normale verifica il file completo una volta e poi usa la cache; un archivio mancante o corrotto attiva brevi toni di ripiego, sempre subordinati a Silenzioso, Non disturbare e al volume Interazioni. La pulizia ordinaria dell’archivio conserva il file audio su un filesystem sano. Una formattazione esplicita di un volume non montabile richiede invece di reinstallarlo.
 
-Hardware check, firmware 0.8.1: full archive SHA-256 matched after both installer and normal boot; LittleFS used 2,854,912 of 8,323,072 bytes in both cases. Cached packs measured 21 ms (Zen), 47 ms (Organic), 58 ms (Dreamy), and 35 ms (Sci-fi). These are pack-change loads; subsequent cues use the cache. Normal firmware uses 2,366,267 / 4,194,304 program bytes (56.4%); no embedded cue arrays remain in its ELF.
+I test host compilano il runtime reale nelle varianti normale e installer: PCM identico, cache senza letture, integrità, copia parziale, rinomina fallita, spazio insufficiente e conservazione dei file utente/Chiave, anche sostituendo il file dei vecchi pacchetti. Ascolto sullo speaker e comportamento del motorino restano da verificare sullo StopWatch; non è stata provocata un’interruzione elettrica reale.

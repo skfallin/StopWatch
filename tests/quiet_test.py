@@ -21,7 +21,7 @@ functions = [function(signature) for signature in (
     "void diagnosticAction()", "void startRecording(bool fromTouch)",
 )]
 touch = function("void handleTouch(const ui::Gesture& gesture)")
-functions.append(touch[:touch.index("    if(noticeTouch)")] + "    ++underlyingTouches;\n}")
+functions.append(touch[:touch.index("    if(screen==Screen::Light && !notes.busy()")] + "    ++underlyingTouches;\n}")
 start = source.index("    if(events.recordStop) stopRecording();", source.index("void loop()"))
 end = source.index("    if(M5.Touch.getCount()>1)", start)
 functions.append("void buttons(const InputEvents& events) {\n" + source[start:end] + "}\n")

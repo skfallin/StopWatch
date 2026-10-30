@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "settings.h"
 #include <Preferences.h>
 #include <cstring>
@@ -5,14 +6,14 @@
 namespace {
 bool stringField(JsonObjectConst input, const char* key, String& target, size_t limit, String& error) {
     if (!input[key].is<const char*>()) {
-        error = String("Campo non valido: ") + key;
+        error = String(i18n::text("Campo non valido: ")) + key;
         return false;
     }
     const JsonString text = input[key].as<JsonString>();
     String value = input[key].as<String>();
     if (value.length() > limit || std::strlen(text.c_str()) != text.size() ||
         value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0) {
-        error = String("Campo troppo lungo o non valido: ") + key;
+        error = String(i18n::text("Campo troppo lungo o non valido: ")) + key;
         return false;
     }
     target = value;
@@ -21,12 +22,21 @@ bool stringField(JsonObjectConst input, const char* key, String& target, size_t 
 }
 
 void Settings::toJson(JsonObject out, bool includeSecrets) const {
+    out["language"]=language;
+    out["time_zone"]=timeZone;
+    if(!includeSecrets) {
+        auto zones=out["time_zones"].to<JsonArray>();
+        for(const auto& zone:regional::zones) zones.add(zone.id);
+    }
+    auto apps=out["home_apps"].to<JsonArray>();
+    for(size_t i=0;i<homeAppCount;++i) apps.add(launcher::ids[homeApps[i]]);
     out["brightness"] = brightness;
     out["volume"] = volume;
     out["note_volume"] = noteVolume;
     out["do_not_disturb"] = doNotDisturb;
     out["sound_pack"] = sfx::packIds[soundPack];
     out["color_theme"] = ui::themes[colorTheme].id;
+    out["presentation_page_keys"]=presentationPageKeys;
     out["clock_face"]=clockwork::faceIds[clockFace];
     out["clock_keep_awake"]=clockKeepAwake;
     out["timer_seconds"]=timerSeconds;
@@ -61,10 +71,20 @@ void Settings::toJson(JsonObject out, bool includeSecrets) const {
 
 bool Settings::update(JsonObjectConst input, String& error) {
     Settings next = *this;
+    if(!input["language"].isUnbound()) {
+        if(!stringField(input,"language",next.language,2,error) || !regional::language(next.language.c_str())) {
+            error=i18n::text("Lingua non valida");return false;
+        }
+    }
+    if(!input["time_zone"].isUnbound()) {
+        if(!stringField(input,"time_zone",next.timeZone,40,error) || !regional::rule(next.timeZone.c_str())) {
+            error=i18n::text("Fuso orario non valido");return false;
+        }
+    }
     const auto number = [&](const char* key, int minimum, int maximum, int& value) {
-        if (!input[key].is<int>()) { error = String("Campo non valido: ") + key; return false; }
+        if (!input[key].is<int>()) { error = String(i18n::text("Campo non valido: ")) + key; return false; }
         value = input[key].as<int>();
-        if (value < minimum || value > maximum) { error = String("Fuori intervallo: ") + key; return false; }
+        if (value < minimum || value > maximum) { error = String(i18n::text("Fuori intervallo: ")) + key; return false; }
         return true;
     };
     int brightnessValue, volumeValue, vibrationValue, timeoutValue;
@@ -73,7 +93,7 @@ bool Settings::update(JsonObjectConst input, String& error) {
     next.brightness = brightnessValue;
     next.volume = volumeValue;
     if(!input["do_not_disturb"].isUnbound()) {
-        if(!input["do_not_disturb"].is<bool>()) { error="Modalita non disturbare non valida"; return false; }
+        if(!input["do_not_disturb"].is<bool>()) { error=i18n::text("Modalita non disturbare non valida"); return false; }
         next.doNotDisturb=input["do_not_disturb"].as<bool>();
     }
     if(!input["note_volume"].isUnbound()) {
@@ -87,26 +107,41 @@ bool Settings::update(JsonObjectConst input, String& error) {
         String pack;
         if (!stringField(input,"sound_pack",pack,16,error)) return false;
         const int index=sfx::packIndex(pack.c_str());
-        if (index<0) { error="Pacchetto suoni non valido"; return false; }
+        if (index<0) { error=i18n::text("Pacchetto suoni non valido"); return false; }
         next.soundPack=index;
     }
     if (!input["color_theme"].isNull()) {
         String theme;
         if (!stringField(input,"color_theme",theme,16,error)) return false;
         const int index=ui::themeIndex(theme.c_str());
-        if (index<0) { error="Tema colori non valido"; return false; }
+        if (index<0) { error=i18n::text("Tema colori non valido"); return false; }
         next.colorTheme=index;
+    }
+    if(!input["presentation_page_keys"].isUnbound()) {
+        if(!input["presentation_page_keys"].is<bool>()) { error=i18n::text("Tasti Slide non validi");return false; }
+        next.presentationPageKeys=input["presentation_page_keys"].as<bool>();
+    }
+    if(!input["home_apps"].isUnbound()) {
+        if(!input["home_apps"].is<JsonArrayConst>() || input["home_apps"].size()<1 || input["home_apps"].size()>launcher::appCount) { error=i18n::text("Home non valida");return false; }
+        std::array<bool,launcher::appCount> seen{};next.homeAppCount=0;
+        for(auto item:input["home_apps"].as<JsonArrayConst>()) {
+            const bool valid=item.is<const char*>() && std::strlen(item.as<const char*>())==item.as<JsonString>().size();
+            const int app=valid?launcher::index(item.as<const char*>()):-1;
+            if(app<0 || seen[app]) { error=i18n::text("App Home non valida o duplicata");return false; }
+            seen[app]=true;next.homeApps[next.homeAppCount++]=app;
+        }
+        if(!seen[7]) { error=i18n::text("Sistema deve restare visibile");return false; }
     }
     String ssidValue, password, token;
     if(!input["clock_face"].isUnbound()) {
         String face;
         if(!stringField(input,"clock_face",face,16,error)) return false;
         const int index=clockwork::faceIndex(face.c_str());
-        if(index<0) { error="Quadrante non valido";return false; }
+        if(index<0) { error=i18n::text("Quadrante non valido");return false; }
         next.clockFace=index;
     }
     if(!input["clock_keep_awake"].isUnbound()) {
-        if(!input["clock_keep_awake"].is<bool>()) { error="Display orologio non valido";return false; }
+        if(!input["clock_keep_awake"].is<bool>()) { error=i18n::text("Display orologio non valido");return false; }
         next.clockKeepAwake=input["clock_keep_awake"].as<bool>();
     }
     if(!input["timer_seconds"].isUnbound()) {
@@ -117,7 +152,7 @@ bool Settings::update(JsonObjectConst input, String& error) {
     if(!input["badge"].isNull()) {
         const auto badge=input["badge"];
         if(!badge["auto_rotate"].is<bool>() || !badge["animate"].is<bool>() || !badge["keep_awake"].is<bool>()) {
-            error="Impostazioni Badge non valide"; return false;
+            error=i18n::text("Impostazioni Badge non valide"); return false;
         }
         next.badgeAutoRotate=badge["auto_rotate"].as<bool>(); next.badgeAnimate=badge["animate"].as<bool>();
         next.badgeKeepAwake=badge["keep_awake"].as<bool>();
@@ -130,22 +165,22 @@ bool Settings::update(JsonObjectConst input, String& error) {
     next.ssid = ssidValue;
     if (next.ssid.isEmpty()) next.wifiPassword = "";
     if (!next.wifiPassword.isEmpty() && next.wifiPassword.length() < 8) {
-        error = "La password Wi-Fi deve avere almeno 8 caratteri"; return false;
+        error = i18n::text("La password Wi-Fi deve avere almeno 8 caratteri"); return false;
     }
     if (!token.isEmpty()) next.haToken = token;
     if (!input["ha_ca"].is<const char*>() || input["ha_ca"].as<String>().length() > 4096) {
-        error = "Certificato CA non valido"; return false;
+        error = i18n::text("Certificato CA non valido"); return false;
     }
     next.haCa = input["ha_ca"].as<String>();
     next.haUrl.trim();
     while (next.haUrl.endsWith("/")) next.haUrl.remove(next.haUrl.length() - 1);
-    if (!policy::baseUrl(next.haUrl.c_str())) { error = "URL Home Assistant non valido"; return false; }
+    if (!policy::baseUrl(next.haUrl.c_str())) { error = i18n::text("URL Home Assistant non valido"); return false; }
     if (!next.haCa.isEmpty() && (next.haCa.indexOf("-----BEGIN CERTIFICATE-----") < 0 ||
         next.haCa.indexOf("-----END CERTIFICATE-----") < 0)) {
-        error = "Certificato CA PEM non valido"; return false;
+        error = i18n::text("Certificato CA PEM non valido"); return false;
     }
     if (next.haUrl.isEmpty()) next.haToken = "";
-    else if (next.haToken.isEmpty()) { error = "Inserisci il token Home Assistant"; return false; }
+    else if (next.haToken.isEmpty()) { error = i18n::text("Inserisci il token Home Assistant"); return false; }
     // Older web clients omit MQTT fields; preserve the existing integration.
     if (input["mqtt_host"].isNull() == false) {
         String mqttPasswordValue;
@@ -155,17 +190,17 @@ bool Settings::update(JsonObjectConst input, String& error) {
             (!input["mqtt_password"].isNull() && !stringField(input, "mqtt_password", mqttPasswordValue, 256, error)) ||
             !number("mqtt_port", 1, 65535, port)) return false;
         if (!policy::brokerHost(next.mqttHost.c_str()) || !input["mqtt_tls"].is<bool>()) {
-            error = "Broker MQTT non valido"; return false;
+            error = i18n::text("Broker MQTT non valido"); return false;
         }
         next.mqttPort = port;
         next.mqttTls = input["mqtt_tls"].as<bool>();
         if (!input["mqtt_ca"].is<const char*>() || input["mqtt_ca"].as<String>().length() > 4096) {
-            error = "CA MQTT non valida"; return false;
+            error = i18n::text("CA MQTT non valida"); return false;
         }
         next.mqttCa = input["mqtt_ca"].as<String>();
         if (!next.mqttCa.isEmpty() && (next.mqttCa.indexOf("-----BEGIN CERTIFICATE-----") < 0 ||
             next.mqttCa.indexOf("-----END CERTIFICATE-----") < 0)) {
-            error = "CA MQTT PEM non valida"; return false;
+            error = i18n::text("CA MQTT PEM non valida"); return false;
         }
         if (next.mqttHost != mqttHost || next.mqttUser != mqttUser || !mqttPasswordValue.isEmpty())
             next.mqttPassword = mqttPasswordValue;
@@ -176,7 +211,7 @@ bool Settings::update(JsonObjectConst input, String& error) {
     for (size_t i = 0; i < next.favoriteCount && !changed; ++i)
         changed = next.favorites[i].entity != favorites[i].entity || next.favorites[i].label != favorites[i].label;
     if (!input["favorites_mqtt"].isNull()) {
-        if (!input["favorites_mqtt"].is<bool>()) { error = "Modalita preferiti non valida"; return false; }
+        if (!input["favorites_mqtt"].is<bool>()) { error = i18n::text("Modalita preferiti non valida"); return false; }
         next.favoritesMqtt = input["favorites_mqtt"].as<bool>();
     } else if (changed) next.favoritesMqtt = false;
     *this = next;
@@ -184,11 +219,11 @@ bool Settings::update(JsonObjectConst input, String& error) {
 }
 
 bool Settings::updateFavorites(JsonArrayConst input, String& error, bool automaticNames) {
-    if (input.size() > policy::maxFavorites) { error = "Sono consentiti al massimo 8 preferiti"; return false; }
+    if (input.size() > policy::maxFavorites) { error = i18n::text("Sono consentiti al massimo 8 preferiti"); return false; }
     std::array<Favorite, policy::maxFavorites> next{};
     size_t count = 0;
     for (auto item : input) {
-        if (!item.is<JsonObjectConst>()) { error = "Preferito non valido"; return false; }
+        if (!item.is<JsonObjectConst>()) { error = i18n::text("Preferito non valido"); return false; }
         Favorite favorite;
         if (!stringField(item.as<JsonObjectConst>(), "label", favorite.label, automaticNames ? 128 : 32, error) ||
             !stringField(item.as<JsonObjectConst>(), "entity", favorite.entity, 96, error)) return false;
@@ -198,7 +233,7 @@ bool Settings::updateFavorites(JsonArrayConst input, String& error, bool automat
             favorite.label = String(label.data(), label.size());
         }
         if (favorite.label.isEmpty() || !policy::entityId(favorite.entity.c_str())) {
-            error = "Ogni preferito richiede nome e entity_id validi"; return false;
+            error = i18n::text("Ogni preferito richiede nome e entity_id validi"); return false;
         }
         next[count++] = favorite;
     }
@@ -229,6 +264,9 @@ bool Settings::load() {
     if (json.length() > policy::maxConfigBytes) return false;
     JsonDocument document;
     if (deserializeJson(document, json) || !document.is<JsonObject>()) return false;
+    // Existing installations used Italian and Rome before regional settings existed.
+    if(document["language"].isUnbound()) document["language"]="it";
+    if(document["time_zone"].isUnbound()) document["time_zone"]="Europe/Rome";
     if(document["note_volume"].isUnbound()) document["note_volume"]=document["volume"];
     String error;
     return update(document.as<JsonObjectConst>(), error);

@@ -15,12 +15,12 @@ struct RelayAccount: Codable, Sendable {
                   var parts = URLComponents(string: url), parts.scheme == "https",
                   let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil,
                   parts.query == nil, parts.fragment == nil, !parts.path.contains("..") else {
-                throw CompanionError.message("Inserisci l’indirizzo HTTPS di Home Assistant e un token valido.")
+                throw CompanionError.message(String(localized: "Inserisci l’indirizzo HTTPS di Home Assistant e un token valido.", bundle: AppLocalization.bundle))
             }
             parts.scheme = "wss"
             parts.path = parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             parts.path = (parts.path.isEmpty ? "" : "/" + parts.path) + "/api/websocket"
-            guard let endpoint = parts.url else { throw CompanionError.message("Indirizzo Home Assistant non valido.") }
+            guard let endpoint = parts.url else { throw CompanionError.message(String(localized: "Indirizzo Home Assistant non valido.", bundle: AppLocalization.bundle)) }
             return endpoint
         }
     }
@@ -31,6 +31,7 @@ struct RelayCommand: Decodable, Sendable {
     let request: UInt32
     let entity: String?
     let action: Bool?
+    let brightness: Int?
     let command: String?
     let source: String?
     let playlist: String?
@@ -38,7 +39,7 @@ struct RelayCommand: Decodable, Sendable {
     let sentAt: Int64?
     let url: String?
     enum CodingKeys: String, CodingKey {
-        case request, entity, action, command, source, playlist, offset, url
+        case request, entity, action, brightness, command, source, playlist, offset, url
         case sentAt = "sent_at"
     }
 }
@@ -49,27 +50,32 @@ struct RelayEvent: Decodable, Sendable {
     enum CodingKeys: String, CodingKey { case kind, payload; case ageMS = "age_ms" }
 
     func validated(now: Date = Date()) throws -> RelayCommand {
-        guard ageMS < 12_000, payload.utf8.count <= 2048 else { throw CompanionError.message("Richiesta scaduta.") }
+        guard ageMS < 12_000, payload.utf8.count <= 2048 else { throw CompanionError.message(String(localized: "Richiesta scaduta.", bundle: AppLocalization.bundle)) }
         let value = try JSONDecoder().decode(RelayCommand.self, from: Data(payload.utf8))
         switch kind {
         case .favorite:
             guard let entity = value.entity, entity.range(of: "^[a-z0-9_]+\\.[a-z0-9_]+$", options: .regularExpression) != nil,
-                  entity.utf8.count <= 96, value.action != nil else { throw CompanionError.message("Preferito non valido.") }
+                  entity.utf8.count <= 96, value.action != nil else { throw CompanionError.message(String(localized: "Preferito non valido.", bundle: AppLocalization.bundle)) }
+            if let level = value.brightness {
+                guard value.action == true, entity.hasPrefix("light."), (0...100).contains(level) else {
+                    throw CompanionError.message(String(localized: "Luminosità non valida.", bundle: AppLocalization.bundle))
+                }
+            }
         case .music:
             guard let command = value.command,
                   ["refresh", "play", "pause", "next", "previous", "source", "playlists", "playlist"].contains(command),
                   command != "source" || (value.source?.utf8.count ?? 0) > 0 && (value.source?.utf8.count ?? 999) <= 128,
                   command != "playlist" || value.playlist?.range(of: "^spotify:playlist:[A-Za-z0-9]{22}$", options: .regularExpression) != nil,
                   command != "playlists" || value.offset.map({ $0 >= 0 && $0 <= 10_000 && $0 % 8 == 0 }) == true else {
-                throw CompanionError.message("Comando Spotify non valido.")
+                throw CompanionError.message(String(localized: "Comando Spotify non valido.", bundle: AppLocalization.bundle))
             }
         case .artwork:
-            guard let url = value.url, url.utf8.count <= 1280 else { throw CompanionError.message("Copertina non valida.") }
+            guard let url = value.url, url.utf8.count <= 1280 else { throw CompanionError.message(String(localized: "Copertina non valida.", bundle: AppLocalization.bundle)) }
         }
         let changesState = kind == .favorite ? value.action == true : kind == .music && value.command != "refresh" && value.command != "playlists"
         if changesState {
             guard let sent = value.sentAt, (0...5).contains(now.timeIntervalSince1970 - Double(sent)) else {
-                throw CompanionError.message("Comando scaduto: verifica lo stato prima di riprovare.")
+                throw CompanionError.message(String(localized: "Comando scaduto: verifica lo stato prima di riprovare.", bundle: AppLocalization.bundle))
             }
         }
         return value
@@ -77,7 +83,7 @@ struct RelayEvent: Decodable, Sendable {
 
     func topic(deviceID: String, suffix: String) throws -> String {
         guard deviceID.range(of: "^stopwatch_[0-9a-f]{12}$", options: .regularExpression) != nil,
-              kind != .artwork, ["request", "result"].contains(suffix) else { throw CompanionError.message("Identità StopWatch non valida.") }
+              kind != .artwork, ["request", "result"].contains(suffix) else { throw CompanionError.message(String(localized: "Identità StopWatch non valida.", bundle: AppLocalization.bundle)) }
         return "stopwatch/\(deviceID)/\(kind.rawValue)/\(suffix)"
     }
 
@@ -110,7 +116,7 @@ enum RelayKeychain {
         var value: CFTypeRef?
         let status = SecItemCopyMatching(request as CFDictionary, &value)
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = value as? Data else { throw CompanionError.message("Portachiavi non disponibile. Sblocca l’iPhone una volta dopo il riavvio.") }
+        guard status == errSecSuccess, let data = value as? Data else { throw CompanionError.message(String(localized: "Portachiavi non disponibile. Sblocca l’iPhone una volta dopo il riavvio.", bundle: AppLocalization.bundle)) }
         return try JSONDecoder().decode(RelayAccount.self, from: data)
     }
     static func save(_ account: RelayAccount, device: UUID) throws {
@@ -121,7 +127,7 @@ enum RelayKeychain {
         if status == errSecItemNotFound {
             status = SecItemAdd(query(device).merging(attributes) { _, new in new } as CFDictionary, nil)
         }
-        guard status == errSecSuccess else { throw CompanionError.message("Impossibile salvare il ponte nel portachiavi.") }
+        guard status == errSecSuccess else { throw CompanionError.message(String(localized: "Impossibile salvare il ponte nel portachiavi.", bundle: AppLocalization.bundle)) }
     }
     static func remove(_ device: UUID) { SecItemDelete(query(device) as CFDictionary) }
 }
@@ -152,7 +158,7 @@ struct HomeRelay {
         func result(event request: RelayEvent, deviceID: String, requestID: UInt32) throws -> String? {
             guard type == "event", id == 1, let trigger = event?.variables.trigger,
                   trigger.topic == (try request.topic(deviceID: deviceID, suffix: "result")) else { return nil }
-            guard trigger.payload.utf8.count <= (request.kind == .favorite ? 2048 : 4096) else { throw CompanionError.message("Risposta Home Assistant troppo grande.") }
+            guard trigger.payload.utf8.count <= (request.kind == .favorite ? 2048 : 4096) else { throw CompanionError.message(String(localized: "Risposta Home Assistant troppo grande.", bundle: AppLocalization.bundle)) }
             struct Header: Decodable { let request: UInt32; let success: Bool }
             guard let header = try? JSONDecoder().decode(Header.self, from: Data(trigger.payload.utf8)) else { return nil }
             return header.request == requestID ? trigger.payload : nil
@@ -202,7 +208,7 @@ struct HomeRelay {
             func receive() async throws -> Frame {
                 let message = try await socket.receive()
                 let data: Data
-                switch message { case .string(let text): data = Data(text.utf8); case .data(let bytes): data = bytes; @unknown default: throw CompanionError.message("Risposta Home Assistant non valida.") }
+                switch message { case .string(let text): data = Data(text.utf8); case .data(let bytes): data = bytes; @unknown default: throw CompanionError.message(String(localized: "Risposta Home Assistant non valida.", bundle: AppLocalization.bundle)) }
                 return try JSONDecoder().decode(Frame.self, from: data)
             }
             func send(_ command: Command) async throws {
@@ -211,16 +217,16 @@ struct HomeRelay {
             }
             guard try await receive().type == "auth_required", let origin = socket.response?.url,
                   origin.host == endpoint.host, origin.port == endpoint.port, origin.scheme == endpoint.scheme || origin.scheme == "https" else {
-                throw CompanionError.message("Connessione Home Assistant non valida.")
+                throw CompanionError.message(String(localized: "Connessione Home Assistant non valida.", bundle: AppLocalization.bundle))
             }
             try await send(Command(type: "auth", access_token: account.token))
-            guard try await receive().type == "auth_ok" else { throw CompanionError.message("Home Assistant: token non valido.") }
+            guard try await receive().type == "auth_ok" else { throw CompanionError.message(String(localized: "Home Assistant: token non valido.", bundle: AppLocalization.bundle)) }
             let subscription = try event?.topic(deviceID: deviceID, suffix: "result") ?? "stopwatch/\(deviceID)/favorite/result"
-            guard deviceID.range(of: "^stopwatch_[0-9a-f]{12}$", options: .regularExpression) != nil else { throw CompanionError.message("Identità StopWatch non valida.") }
+            guard deviceID.range(of: "^stopwatch_[0-9a-f]{12}$", options: .regularExpression) != nil else { throw CompanionError.message(String(localized: "Identità StopWatch non valida.", bundle: AppLocalization.bundle)) }
             try await send(Command(type: "subscribe_trigger", id: 1, trigger: .init(topic: subscription)))
             let subscribed = try await receive()
             guard subscribed.id == 1, subscribed.type == "result", subscribed.success == true else {
-                throw CompanionError.message("Home Assistant: il ponte richiede un token amministratore e MQTT attivo.")
+                throw CompanionError.message(String(localized: "Home Assistant: il ponte richiede un token amministratore e MQTT attivo.", bundle: AppLocalization.bundle))
             }
             // HA batches MQTT subscriptions; its WebSocket ACK can precede the broker SUBACK.
             let probe = "{\"relay_probe\":\"\(UUID().uuidString)\"}"
@@ -238,7 +244,7 @@ struct HomeRelay {
                 let frame = try await receive()
                 if frame.echoes(probe, topic: subscription) { break }
                 if let id = frame.id, (2...6).contains(id), frame.type == "result", frame.success != true {
-                    throw CompanionError.message("Il broker MQTT non ha confermato il ponte.")
+                    throw CompanionError.message(String(localized: "Il broker MQTT non ha confermato il ponte.", bundle: AppLocalization.bundle))
                 }
             }
             probes.cancel()
@@ -250,7 +256,7 @@ struct HomeRelay {
                 service_data: .init(topic: try event.topic(deviceID: deviceID, suffix: "request"), payload: event.payload)))
             while true {
                 let frame = try await receive()
-                if frame.id == 7, frame.type == "result", frame.success != true { throw CompanionError.message("Home Assistant non ha confermato l’invio. Verifica lo stato.") }
+                if frame.id == 7, frame.type == "result", frame.success != true { throw CompanionError.message(String(localized: "Home Assistant non ha confermato l’invio. Verifica lo stato.", bundle: AppLocalization.bundle)) }
                 if let result = try frame.result(event: event, deviceID: deviceID, requestID: command.request) { return result }
             }
         } onCancel: { socket.cancel(with: .goingAway, reason: nil) }
@@ -259,20 +265,20 @@ struct HomeRelay {
     func artworkURL(_ value: String) throws -> (URL, Bool) {
         guard value.utf8.count <= 1280, !value.contains(where: { $0.isWhitespace }), !value.contains("\\"),
               let source = URLComponents(string: value), source.user == nil, source.password == nil, source.fragment == nil else {
-            throw CompanionError.message("Indirizzo copertina non valido.")
+            throw CompanionError.message(String(localized: "Indirizzo copertina non valido.", bundle: AppLocalization.bundle))
         }
         if source.path.hasPrefix("/api/media_player_proxy/media_player."), !source.path.contains(".."), source.query != nil {
             var target = URLComponents(url: try account.endpoint, resolvingAgainstBaseURL: false)!
             target.scheme = "https"
             target.path = String(target.path.dropLast("/api/websocket".count)) + source.path
             target.query = source.query
-            guard let url = target.url else { throw CompanionError.message("Copertina Home Assistant non valida.") }
+            guard let url = target.url else { throw CompanionError.message(String(localized: "Copertina Home Assistant non valida.", bundle: AppLocalization.bundle)) }
             return (url, true)
         }
         guard source.scheme == "https", source.port == nil,
               ["i.scdn.co", "image-cdn-ak.spotifycdn.com", "image-cdn-fa.spotifycdn.com"].contains(source.host),
               source.path.hasPrefix("/image/"), source.path.count > 7, let url = source.url else {
-            throw CompanionError.message("Origine copertina non consentita.")
+            throw CompanionError.message(String(localized: "Origine copertina non consentita.", bundle: AppLocalization.bundle))
         }
         return (url, false)
     }
@@ -286,10 +292,10 @@ struct HomeRelay {
         defer { client.invalidateAndCancel() }
         let (stream, response) = try await client.bytes(for: request)
         guard let response = response as? HTTPURLResponse, response.statusCode == 200,
-              response.expectedContentLength <= 384 * 1024 else { throw CompanionError.message("Copertina non disponibile.") }
+              response.expectedContentLength <= 384 * 1024 else { throw CompanionError.message(String(localized: "Copertina non disponibile.", bundle: AppLocalization.bundle)) }
         var bytes = Data()
         for try await byte in stream {
-            guard bytes.count < 384 * 1024 else { throw CompanionError.message("Copertina troppo grande.") }
+            guard bytes.count < 384 * 1024 else { throw CompanionError.message(String(localized: "Copertina troppo grande.", bundle: AppLocalization.bundle)) }
             bytes.append(byte)
         }
         guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
@@ -298,7 +304,7 @@ struct HomeRelay {
               width > 0, height > 0, width <= 2048, height <= 2048,
               let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 188] as CFDictionary) else {
-            throw CompanionError.message("Immagine copertina non valida.")
+            throw CompanionError.message(String(localized: "Immagine copertina non valida.", bundle: AppLocalization.bundle))
         }
         for quality in [0.65, 0.45, 0.25, 0.1] {
             let data = NSMutableData()
@@ -310,6 +316,6 @@ struct HomeRelay {
             jsonEncoder.outputFormatting = .withoutEscapingSlashes
             return String(decoding: try jsonEncoder.encode(Artwork(request: command.request, jpeg: (data as Data).base64EncodedString())), as: UTF8.self)
         }
-        throw CompanionError.message("Copertina non comprimibile entro il limite Bluetooth.")
+        throw CompanionError.message(String(localized: "Copertina non comprimibile entro il limite Bluetooth.", bundle: AppLocalization.bundle))
     }
 }

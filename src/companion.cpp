@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "companion.h"
 #include <LittleFS.h>
 #include <M5Unified.h>
@@ -5,6 +6,7 @@
 #include <host/ble_store.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs_mbuf.h>
+#include <services/gatt/ble_svc_gatt.h>
 #include <mbedtls/base64.h>
 #include <memory>
 #include <cstring>
@@ -15,6 +17,7 @@ namespace {
 constexpr const char* serviceUuid = "75f3a100-9e9a-4b9c-9d73-c85f44e6a001";
 constexpr const char* rxUuid = "75f3a101-9e9a-4b9c-9d73-c85f44e6a001";
 constexpr const char* txUuid = "75f3a102-9e9a-4b9c-9d73-c85f44e6a001";
+constexpr const char* mouseUuid = "75f3a103-9e9a-4b9c-9d73-c85f44e6a001";
 }
 
 bool Companion::begin() {
@@ -22,7 +25,8 @@ bool Companion::begin() {
     snprintf(suffix, sizeof(suffix), "%06lx", (unsigned long)(ESP.getEfuseMac() & 0xffffff));
     name_ = String("StopWatch-") + suffix;
     packets_ = xQueueCreate(8, sizeof(Packet));
-    if (!packets_ || !BLEDevice::init(name_)) return false;
+    mousePackets_ = xQueueCreate(8, sizeof(MousePacket));
+    if (!packets_ || !mousePackets_ || !BLEDevice::init(name_)) return false;
     BLEDevice::setMTU(517);
     BLEDevice::setSecurityCallbacks(this);
     BLESecurity::setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
@@ -44,6 +48,10 @@ bool Companion::begin() {
         BLECharacteristic::PROPERTY_READ_ENC | BLECharacteristic::PROPERTY_READ_AUTHEN);
     tx_->setCallbacks(this);
     tx_->setValue("{\"id\":0,\"ok\":true,\"data\":{\"protocol\":1}}\n");
+    // Keep the existing RX/TX handles stable for bonded iPhones with a cached GATT database.
+    mouseRx_ = service->createCharacteristic(mouseUuid, BLECharacteristic::PROPERTY_WRITE_NR |
+        BLECharacteristic::PROPERTY_WRITE_ENC | BLECharacteristic::PROPERTY_WRITE_AUTHEN);
+    mouseRx_->setCallbacks(this);
     service->start();
     auto* advertising = BLEDevice::getAdvertising();
     advertising->addServiceUUID(serviceUuid);
@@ -51,6 +59,8 @@ bool Companion::begin() {
     advertising->setMinPreferred(0x0c);
     advertising->setMaxPreferred(0x18);
     advertising->start();
+    // Invalidate cached handles on bonded peers after a firmware restart, without deleting bonds.
+    ble_svc_gatt_changed(1,0xffff);
     return true;
 }
 
@@ -143,6 +153,14 @@ void Companion::onAuthenticationComplete(ble_gap_conn_desc* result) {
 
 void Companion::onWrite(BLECharacteristic* characteristic, ble_gap_conn_desc*) {
     const String value = characteristic->getValue();
+    if(characteristic==mouseRx_) {
+        if(!connected() || value.length()!=8) return;
+        MousePacket packet{};packet.session=session_;
+        memcpy(packet.bytes,value.c_str(),8);
+        // Motion is best effort; never disconnect the authenticated phone for a busy pointer queue.
+        xQueueSend(mousePackets_,&packet,0);
+        return;
+    }
     if (!connected() || value.isEmpty() || value.length() > sizeof(Packet::bytes)) {
         reject_ = true; return;
     }
@@ -192,6 +210,7 @@ void Companion::status(JsonObject out) const {
     out["touch"] = M5.Touch.isEnabled();
     out["button_a"] = M5.BtnA.isPressed();
     out["button_b"] = M5.BtnB.isPressed();
+    usb_.status(out["usb"].to<JsonObject>());
     extraStatus_(out);
 }
 
@@ -206,37 +225,44 @@ void Companion::request(const std::string& line) {
     const String op = input["op"].as<String>();
     const auto fail = [&](const String& reason) { reply["ok"] = false; reply["error"] = reason; };
     if (op == "status") status(data);
+    else if (op == "usb.status") usb_.status(data);
+    else if (op == "usb.input") {
+        if(notes_.busy()) fail(i18n::text("Attendi il salvataggio della nota"));
+        else if(!input["data"].is<JsonObjectConst>()) fail(i18n::text("Comando USB non valido"));
+        else if(const auto* reason=usb_.input(input["data"].as<JsonObjectConst>())) fail(reason);
+        usb_.status(data);
+    }
     else if (op == "config.get") settings_.toJson(data);
     else if(op=="relay.credentials") {
-        if(!settings_.haUrl.startsWith("https://") || settings_.haToken.isEmpty()) fail("Configura l'indirizzo HTTPS remoto e il token Home Assistant");
+        if(!settings_.haUrl.startsWith("https://") || settings_.haToken.isEmpty()) fail(i18n::text("Configura l'indirizzo HTTPS remoto e il token Home Assistant"));
         else { data["url"]=settings_.haUrl;data["token"]=settings_.haToken;data["enabled"]=true; }
     } else if(op=="relay.configure") {
-        if(!input["data"]["enabled"].is<bool>()) fail("Ponte iPhone non valido");
+        if(!input["data"]["enabled"].is<bool>()) fail(i18n::text("Ponte iPhone non valido"));
         else { relay_.enable(input["data"]["enabled"].as<bool>());data["enabled"]=relay_.enabled(); }
     } else if(op=="relay.reply") {
         const auto value=input["data"].as<JsonObjectConst>();
         const auto kind=phone::kind(value["kind"] | "");
-        if(kind==phone::Kind::Invalid || !value["payload"].is<const char*>()) fail("Risposta ponte non valida");
+        if(kind==phone::Kind::Invalid || !value["payload"].is<const char*>()) fail(i18n::text("Risposta ponte non valida"));
         else {
             const auto payload=value["payload"].as<JsonString>();
             JsonDocument result;
             if(payload.size()>phone::resultLimit(kind) || std::strlen(payload.c_str())!=payload.size() ||
                deserializeJson(result,payload.c_str(),payload.size()) || !result["request"].is<uint32_t>() || !result["success"].is<bool>() ||
-               !relay_.finish(kind,result["request"].as<uint32_t>(),std::string(payload.c_str(),payload.size()),millis())) fail("Richiesta ponte scaduta");
+               !relay_.finish(kind,result["request"].as<uint32_t>(),std::string(payload.c_str(),payload.size()),millis())) fail(i18n::text("Richiesta ponte scaduta"));
         }
     }
-    else if (notes_.busy()) fail("Attendi il salvataggio della nota");
+    else if (notes_.busy()) fail(i18n::text("Attendi il salvataggio della nota"));
     else if (op == "config.set") {
         Settings next = settings_;
         String reason;
-        if (!canSave_()) fail("Attendi la richiesta Home Assistant");
-        else if (!input["data"].is<JsonObjectConst>()) fail("Configurazione non valida");
+        if (!canSave_()) fail(i18n::text("Attendi la richiesta Home Assistant"));
+        else if (!input["data"].is<JsonObjectConst>()) fail(i18n::text("Configurazione non valida"));
         else if (!next.update(input["data"].as<JsonObjectConst>(), reason)) fail(reason);
-        else if (!next.save()) fail("Salvataggio fallito: impostazioni precedenti conservate");
+        else if (!next.save()) fail(i18n::text("Salvataggio fallito: impostazioni precedenti conservate"));
         else { settings_ = next; onSaved_(); settings_.toJson(data); }
     } else if (op == "time.set") {
         const int64_t epoch = input["data"]["epoch"] | int64_t(0);
-        if (epoch < 1704067200 || epoch > 4102444800LL) fail("Ora non valida");
+        if (epoch < 1704067200 || epoch > 4102444800LL) fail(i18n::text("Ora non valida"));
         else {
             timeval now{time_t(epoch), 0};
             settimeofday(&now, nullptr);
@@ -244,11 +270,11 @@ void Companion::request(const std::string& line) {
             if (M5.Rtc.isEnabled()) M5.Rtc.setDateTime(&utc);
         }
     } else if (op == "output") {
-        if (!output_(input["data"]["action"] | "")) fail("Comando non disponibile");
+        if (!output_(input["data"]["action"] | "")) fail(i18n::text("Comando non disponibile"));
     } else if(op=="badge.status") badge_.status(data);
     else if(op=="badge.begin") {
         String reason;
-        if(!notes_.ready() || !input["data"]["bytes"].is<uint32_t>() || !input["data"]["digest"].is<const char*>()) fail("Badge non valido o archivio non disponibile");
+        if(!notes_.ready() || !input["data"]["bytes"].is<uint32_t>() || !input["data"]["digest"].is<const char*>()) fail(i18n::text("Badge non valido o archivio non disponibile"));
         else if(!badge_.startUpload(input["data"]["bytes"].as<uint32_t>(),input["data"]["digest"].as<String>(),data,reason)) fail(reason);
     } else if(op=="badge.transfer") {
         noteTransfer_.offerBadge(input["data"]["upload"] | "",data);
@@ -257,7 +283,7 @@ void Companion::request(const std::string& line) {
         std::unique_ptr<uint8_t[]> bytes(new (std::nothrow) uint8_t[4096]); size_t count=0;
         if(!input["data"]["offset"].is<uint32_t>() || encoded.isEmpty() || encoded.length()>5464 ||
            !bytes || mbedtls_base64_decode(bytes.get(),4096,&count,reinterpret_cast<const uint8_t*>(encoded.c_str()),encoded.length())!=0 ||
-           !badge_.append(input["data"]["upload"] | "",input["data"]["offset"].as<uint32_t>(),bytes.get(),count)) fail("Blocco Badge rifiutato");
+           !badge_.append(input["data"]["upload"] | "",input["data"]["offset"].as<uint32_t>(),bytes.get(),count)) fail(i18n::text("Blocco Badge rifiutato"));
     } else if(op=="badge.commit") {
         String reason;
         if(!badge_.commit(input["data"]["upload"] | "",reason)) fail(reason);
@@ -281,31 +307,31 @@ void Companion::request(const std::string& line) {
         }
     } else if (op == "notes.transfer") {
         const String name = input["data"]["name"] | "";
-        if (!policy::noteFilename(name.c_str()) || !notes_.ready()) fail("Nota non valida o archivio non disponibile");
+        if (!policy::noteFilename(name.c_str()) || !notes_.ready()) fail(i18n::text("Nota non valida o archivio non disponibile"));
         else noteTransfer_.offer(name, data);
     } else if (op == "notes.read" || op == "notes.delete") {
         const String name = input["data"]["name"] | "";
-        if (!notes_.ready() || !policy::noteFilename(name.c_str())) fail("Nota non valida o archivio non disponibile");
+        if (!notes_.ready() || !policy::noteFilename(name.c_str())) fail(i18n::text("Nota non valida o archivio non disponibile"));
         else if (op == "notes.delete") {
-            if (!LittleFS.remove(String("/notes/") + name)) fail("Nota non trovata");
+            if (!LittleFS.remove(String("/notes/") + name)) fail(i18n::text("Nota non trovata"));
             else notesChanged_ = true;
-        } else if (!input["data"]["offset"].is<uint32_t>()) fail("Offset non valido");
+        } else if (!input["data"]["offset"].is<uint32_t>()) fail(i18n::text("Offset non valido"));
         else {
             const auto length = input["data"]["length"];
             const size_t requested = length.isNull() ? 768 : length.as<size_t>();
             if ((!length.isNull() && !length.is<unsigned int>()) || !requested || requested > maxBleAudioChunkBytes) {
-                fail("Dimensione blocco non valida");
+                fail(i18n::text("Dimensione blocco non valida"));
             } else {
                 File file = LittleFS.open(String("/notes/") + name, "r");
                 const uint32_t offset = input["data"]["offset"].as<uint32_t>();
-                if (!file || offset >= file.size() || !file.seek(offset)) fail("Nota non trovata o offset non valido");
+                if (!file || offset >= file.size() || !file.seek(offset)) fail(i18n::text("Nota non trovata o offset non valido"));
                 else {
                     const size_t capacity = 4 * ((requested + 2) / 3) + 1;
                     std::unique_ptr<uint8_t[]> bytes(new (std::nothrow) uint8_t[requested]);
                     std::unique_ptr<uint8_t[]> encoded(new (std::nothrow) uint8_t[capacity]);
                     const size_t count = bytes && encoded ? file.read(bytes.get(), std::min<size_t>(requested, file.size() - offset)) : 0;
                     size_t size = 0;
-                    if (!count || mbedtls_base64_encode(encoded.get(), capacity, &size, bytes.get(), count) != 0) fail("Lettura nota fallita");
+                    if (!count || mbedtls_base64_encode(encoded.get(), capacity, &size, bytes.get(), count) != 0) fail(i18n::text("Lettura nota fallita"));
                     else {
                         encoded[size] = 0;
                         data["offset"] = offset;
@@ -315,7 +341,7 @@ void Companion::request(const std::string& line) {
                 }
             }
         }
-    } else fail("Comando sconosciuto");
+    } else fail(i18n::text("Comando sconosciuto"));
     response_ = "";
     serializeJson(reply, response_);
     response_ += '\n';
@@ -345,6 +371,9 @@ void Companion::update() {
     }
     if (advertise_.exchange(false)) server_->startAdvertising();
     if (!connected() || !subscribed_) return;
+    MousePacket mousePacket;
+    while(xQueueReceive(mousePackets_,&mousePacket,0)==pdTRUE)
+        if(mousePacket.session==transferSession_) usb_.motion(mousePacket.bytes,sizeof(mousePacket.bytes));
     Packet packet;
     // A new request may arrive while the previous reply's note event is draining.
     while (response_.isEmpty() && xQueueReceive(packets_, &packet, 0) == pdTRUE) {

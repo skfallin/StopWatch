@@ -56,25 +56,31 @@ struct {
     void button(const String& key,const String& event) { events.push_back(key+":"+event); }
 } mqtt;
 namespace sfx {
-enum class Cue { Select, Complete, Error };
 int plays=0;
 bool ready() { return true; }
-void prepare(int) {}
-void play(int,Cue,int volume,bool) { ++plays;M5.Speaker.active=true;M5.Speaker.volume=policy::speakerVolume(volume); }
+bool prepare(uint8_t) { return true; }
+bool play(uint8_t,Cue,uint8_t volume,bool) { ++plays;M5.Speaker.active=true;M5.Speaker.volume=policy::speakerVolume(volume);return true; }
 void stop() {}
 }
-namespace ui { void setTheme(int) {} }
+namespace ui { void setTheme(int) {} enum class Icon { Activity }; }
+ui::HomeMenu homeMenu;
+struct { int value=60,initial=60; } lightDraft;
 using Screen=ui::Screen;
 Screen screen=Screen::Home;
 Controls controls;
 ui::TouchInput touchInput;
 std::array<uint16_t,24> waveform{};
+int casaHoldProgress=0,lightOpens=0,quickPage=0,quickPreview=-1;
+bool dimmable=false;
+bool favoriteCanDim() { return dimmable; }
+void openLight() { ++lightOpens;screen=Screen::Light; }
 bool dirty=false,screenOff=false,displayDimmed=false,ledOn=false,touchRecording=false,noticeTouch=false;
 bool quickPanelOpen=false,quietSavePending=false,quietSaveFailed=false,homeAfterNote=false;
-uint32_t vibrationUntil=0,lastInteraction=0,noticeAt=0;
+uint32_t transitionAt=0,vibrationUntil=0,lastInteraction=0,noticeAt=0,noticeDuration=4500;
+ui::Icon noticeIcon=ui::Icon::Activity;
 size_t diagnostic=0;
 int settingPreview=-1,displayColor=0,underlyingTouches=0,backCalls=0,nextCalls=0,selectCalls=0,stopCalls=0;
-String notice,groveResult;
+String notice,noticeDetail,groveResult;
 void changeScreen(Screen next) { screen=next; }
 void backAction() { ++backCalls; }
 void nextAction() { ++nextCalls; }
@@ -137,9 +143,9 @@ int main() {
     notes.busyFlag=true;noticeTouch=true;
     handleTouch({ui::GestureKind::QuickOpen,233,200,233,24});
     assert(quickPanelOpen && !underlyingTouches && notes.busy());
-    handleTouch({ui::GestureKind::Tap,233,207,233,207});
+    handleTouch({ui::GestureKind::Tap,233,265,233,265});
     assert(settings.doNotDisturb && notes.busy());
-    handleTouch({ui::GestureKind::Tap,233,207,90,207});
+    handleTouch({ui::GestureKind::Tap,233,265,90,265});
     handleTouch({ui::GestureKind::Left,130,250,350,250});
     handleTouch({ui::GestureKind::Tap,10,200,10,200});
     assert(settings.doNotDisturb && quickPanelOpen && !underlyingTouches);
@@ -157,7 +163,27 @@ int main() {
     assert(!quickPanelOpen && notes.busy() && notes.captures==2);
     held={};held.recordStop=true;buttons(held);
     assert(!notes.busy() && stopCalls==1 && !selectCalls);
-    showQuickPanel(true);InputEvents chord;chord.home=true;buttons(chord);
-    assert(!quickPanelOpen && screen==Screen::Home && !backCalls && !nextCalls);
+    screen=Screen::Light;lightDraft.value=65;
+    InputEvents finish;finish.back=true;buttons(finish);assert(screen==Screen::LightConfirm);
+    InputEvents leave;leave.home=true;buttons(leave);assert(screen==Screen::Home);
+    homeMenu.apps=true;showQuickPanel(true);InputEvents chord;chord.home=true;buttons(chord);
+    assert(!quickPanelOpen && !homeMenu.apps && screen==Screen::Home && !backCalls && !nextCalls);
+    showQuickPanel(true);quickPage=1;const int beforeBrightness=settings.brightness;
+    handleTouch({ui::GestureKind::Drag,357,343,233,343});assert(quickPreview==255 && settings.brightness==beforeBrightness && M5.Display.level==255);
+    handleTouch({ui::GestureKind::Release,357,343,233,343});assert(settings.brightness==255 && quietSavePending);
+    quickPage=2;handleTouch({ui::GestureKind::Drag,109,343,233,343});handleTouch({ui::GestureKind::Release,109,343,233,343});assert(settings.volume==0);
+    showQuickPanel(false);
+    screen=Screen::HomeAssistant;dimmable=true;noticeTouch=false;
+    handleTouch({ui::GestureKind::HoldProgress,233,250,233,250,50});assert(casaHoldProgress==50);
+    handleTouch({ui::GestureKind::Hold,233,250,233,250,100});assert(screen==Screen::Light && lightOpens==1 && casaHoldProgress==0);
+    lightOpens=0;
+    screen=Screen::Home;homeMenu.space=1;homeMenu.selected=0;
+    handleTouch({ui::GestureKind::Up,233,170,233,300});assert(homeMenu.selected==1 && homeMenu.apps);
+    handleTouch({ui::GestureKind::Down,233,300,233,170});assert(homeMenu.selected==0);
+    screen=Screen::HomeAssistant;dimmable=true;InputEvents hold;hold.back=true;buttons(hold);
+    assert(screen==Screen::Light && lightOpens==1);
+    screen=Screen::ActionConfirm;buttons(hold);assert(screen==Screen::Light && lightOpens==2);
+    screen=Screen::HomeAssistant;dimmable=false;const int previousBack=backCalls;buttons(hold);
+    assert(backCalls==previousBack+1 && lightOpens==2);
     std::cout<<"OK: silenzio globale, timer, note, diagnostica, MQTT/BLE, pannello e registrazione\n";
 }

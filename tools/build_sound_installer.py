@@ -3,6 +3,8 @@ from pathlib import Path
 import configparser
 import subprocess
 import sys
+import os
+import shlex
 
 root = Path(__file__).resolve().parents[1]
 output = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/stopwatch-sound-installer").resolve()
@@ -18,7 +20,8 @@ config["env:stopwatch"]["build_flags"] += "\n-DSFX_SEED_ARCHIVE"
 path = output / "platformio.ini"
 with path.open("w") as file:
     config.write(file)
-subprocess.run([str(root / ".venv/bin/pio"), "run", "-d", str(root), "-c", str(path)], check=True)
+subprocess.run([sys.executable, "-m", "platformio", "run", "-d", str(root), "-c", str(path)], check=True)
 print(f"Installer built: {output / 'build/stopwatch/firmware.bin'}")
-print(f"Upload with: .venv/bin/pio run -d '{root}' -c '{path}' -t upload --upload-port <port>")
+upload = [sys.executable, "-m", "platformio", "run", "-d", str(root), "-c", str(path), "-t", "upload", "--upload-port", "YOUR_PORT"]
+print("Upload with: " + (subprocess.list2cmdline(upload) if os.name == "nt" else shlex.join(upload)))
 print("Wait for [audio-store] pronto=1 cache=1 before flashing the normal firmware.")

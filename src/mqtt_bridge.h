@@ -29,7 +29,7 @@ public:
     void setRelay(Companion* relay) { relay_=relay; }
     bool available() const;
     const String& deviceId() const { return id_; }
-    bool requestFavorite(size_t favorite, bool action);
+    bool requestFavorite(size_t favorite, bool action,int brightness=-1);
     bool pollFavorite(HomeResult& result);
     bool busy() const { return favoritePending_ || favoriteReady_; }
     bool requestMusic(music::Command command=music::Command::Refresh,const String& value="",uint32_t offset=0);

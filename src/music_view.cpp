@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "music_view.h"
 #include "spotify_icon.h"
 #include <cstdio>
@@ -28,9 +29,9 @@ void player(M5Canvas& c,const music::Playback& p,uint32_t now,bool busy,const St
         ui::icon(c,ui::Icon::Music,233,205,64,ui::accent,ui::selectionSurface);
     }
     const bool fresh=p.fresh(now);
-    const String title=p.title.empty()?"La tua musica":String(p.title.c_str());
+    const String title=p.title.empty()?i18n::text("La tua musica"):String(p.title.c_str());
     ui::label(c,title,233,324,ui::Font::Label,ui::white,background,352);
-    ui::label(c,p.artist.empty()?"Apri Spotify su un dispositivo":String(p.artist.c_str()),233,351,ui::Font::Small,ui::muted,background,350);
+    ui::label(c,p.artist.empty()?i18n::text("Apri Spotify su un dispositivo"):String(p.artist.c_str()),233,351,ui::Font::Small,ui::muted,background,350);
     if(p.durationMs) {
         c.drawWideLine(132,375,334,375,2,ui::line);
         const int x=132+int(uint64_t(p.position(now))*202/p.durationMs);
@@ -48,14 +49,14 @@ void player(M5Canvas& c,const music::Playback& p,uint32_t now,bool busy,const St
         c.drawWideLine(227,407,227,425,2.3,ink);c.drawWideLine(239,407,239,425,2.3,ink);
     } else ui::icon(c,ui::Icon::Play,233,416,25,ink,fill);
     if(message.length()) ui::label(c,message,252,98,ui::Font::Small,ui::muted,background,214);
-    else ui::label(c,p.source.empty()?"Nessun lettore attivo":String(p.source.c_str()),252,98,ui::Font::Small,ui::muted,background,214);
+    else ui::label(c,p.source.empty()?i18n::text("Nessun lettore attivo"):String(p.source.c_str()),252,98,ui::Font::Small,ui::muted,background,214);
 }
 void sources(M5Canvas& c,const music::Playback& p,size_t selected,bool busy) {
-    heading(c,"Dispositivi");
+    heading(c,i18n::text("Dispositivi"));
     if(p.sources.empty()) {
         ui::icon(c,ui::Icon::Speaker,233,210,64,ui::accent);
-        ui::label(c,"Apri Spotify sul lettore",233,295,ui::Font::Body,ui::white);
-        ui::label(c,"Poi torna qui per sceglierlo",233,327,ui::Font::Small,ui::muted);
+        ui::label(c,i18n::text("Apri Spotify sul lettore"),233,295,ui::Font::Body,ui::white);
+        ui::label(c,i18n::text("Poi torna qui per sceglierlo"),233,327,ui::Font::Small,ui::muted);
         return;
     }
     const size_t first=selected>1?selected-1:0;
@@ -67,7 +68,7 @@ void sources(M5Canvas& c,const music::Playback& p,size_t selected,bool busy) {
         ui::icon(c,ui::Icon::Speaker,116,y,23,active?ui::accent:ui::muted,bg);
         ui::label(c,p.sources[i].c_str(),245,y,ui::Font::Body,ui::white,bg,234);
     }
-    ui::pill(c,233,399,218,busy?"Attendi…":"B · Scegli lettore");
+    ui::pill(c,233,399,218,busy?i18n::text("Attendi…"):i18n::text("B · Scegli lettore"));
 }
 void menu(M5Canvas& c,size_t selected) {
     heading(c,"Spotify");
@@ -79,18 +80,18 @@ void menu(M5Canvas& c,size_t selected) {
         const uint32_t bg=i==selected?ui::selectionSurface:ui::surface;
         c.fillSmoothRoundRect(85,y-40,296,80,28,bg);
         ui::icon(c,icons[i],124,y,28,i==selected?ui::accent:ui::muted,bg);
-        ui::label(c,titles[i],247,y,ui::Font::Label,ui::white,bg,208);
+        ui::label(c,i18n::text(titles[i]),247,y,ui::Font::Label,ui::white,bg,208);
     }
-    ui::pill(c,233,387,220,"A · Scorri  B · Apri");
+    ui::pill(c,233,387,220,i18n::text("A · Scorri  B · Apri"));
 }
 void playlists(M5Canvas& c,const music::PlaylistPage& page,size_t selected,bool busy,const String& message) {
     heading(c,"Playlist");
     c.drawBitmap(173,63,spotifyIcon,24,24,ui::white);
     if(page.items.empty()) {
         ui::icon(c,ui::Icon::Music,233,218,60,ui::accent);
-        ui::label(c,busy?"Caricamento…":page.loaded?"Nessuna playlist":"Apri la tua libreria",233,292,ui::Font::Label,ui::white);
-        ui::label(c,message.length()?message:String("Le playlist salvate su Spotify"),233,328,ui::Font::Small,ui::muted,ui::black,300);
-        ui::pill(c,233,399,140,busy?"Attendi…":"B · Riprova");
+        ui::label(c,busy?i18n::text("Caricamento…"):page.loaded?i18n::text("Nessuna playlist"):i18n::text("Apri la tua libreria"),233,292,ui::Font::Label,ui::white);
+        ui::label(c,message.length()?message:String(i18n::text("Le playlist salvate su Spotify")),233,328,ui::Font::Small,ui::muted,ui::black,300);
+        ui::pill(c,233,399,140,busy?i18n::text("Attendi…"):i18n::text("B · Riprova"));
         return;
     }
     const size_t first=selected>1?selected-1:0;
@@ -102,9 +103,9 @@ void playlists(M5Canvas& c,const music::PlaylistPage& page,size_t selected,bool 
         ui::label(c,page.items[i].name.c_str(),245,y,ui::Font::Body,ui::white,bg,234);
     }
     char count[32];snprintf(count,sizeof(count),"%lu / %lu",(unsigned long)(page.offset+selected+1),(unsigned long)page.total);
-    ui::label(c,busy?"Caricamento…":count,233,117,ui::Font::Small,ui::muted,ui::black,210);
+    ui::label(c,busy?i18n::text("Caricamento…"):count,233,117,ui::Font::Small,ui::muted,ui::black,210);
     ui::circleButton(c,ui::playlistPrevious,ui::Icon::Back,20,ui::surface,page.offset?ui::navigation:ui::line);
     ui::circleButton(c,ui::playlistNext,ui::Icon::Next,20,ui::surface,page.hasNext()?ui::navigation:ui::line);
-    ui::pill(c,233,399,140,busy?"Attendi…":"B · Ascolta");
+    ui::pill(c,233,399,140,busy?i18n::text("Attendi…"):i18n::text("B · Ascolta"));
 }
 }

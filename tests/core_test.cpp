@@ -135,17 +135,63 @@ void touchNavigation() {
     for (int x : {noticeCard.x,noticeCard.x+noticeCard.width-1})
         for (int y : {noticeCard.y,noticeCard.y+noticeCard.height-1})
             assert((Circle{233,233,216}.contains(x,y)));
-    assert(noticeCard.contains(355,357) && !noticeCard.contains(233,310));
-    assert((hit(Screen::Home,233,233,0)==Target{Action::Open,0}));
-    assert((hit(Screen::Home,120,351,0)==Target{Action::Open,1}));
-    assert((hit(Screen::Home,346,351,2)==Target{Action::Open,1}));
+    assert(noticeCard.contains(233,149) && !noticeCard.contains(233,310));
+    HomeMenu menu;
+    bool reachable[homeCount]={};
+    for(int space=0;space<3;++space) {
+        menu.space=space;
+        int top=466,bottom=0,left=466,right=0;
+        for(int slot=0;slot<menu.visibleCount();++slot) {
+            const auto circle=menu.circle(slot);
+            top=std::min(top,circle.y-circle.radius);bottom=std::max(bottom,circle.y+circle.radius);
+            left=std::min(left,circle.x-circle.radius);right=std::max(right,circle.x+circle.radius);
+            assert((hit(Screen::Home,circle.x,circle.y,0,false,false,false,menu)==Target{Action::Open,slot}));
+
+        }
+        assert(std::abs(left+right-466)<=1 && std::abs(top+bottom-466)<=1);
+        for(bool next:{false,true}) {
+            const auto arrow=menu.arrow(next);
+            assert(arrow.radius>=36);
+            assert(hit(Screen::Home,arrow.x,arrow.y,0,false,false,false,menu).action==(next?Action::Next:Action::Previous));
+            for(int slot=0;slot<menu.visibleCount();++slot) {
+                const auto circle=menu.circle(slot);
+                assert((circle.x-arrow.x)*(circle.x-arrow.x)+(circle.y-arrow.y)*(circle.y-arrow.y)>
+                    (circle.radius+arrow.radius)*(circle.radius+arrow.radius));
+            }
+        }
+        for(int slot=0;slot<menu.count();++slot) reachable[menu.app(slot)]=true;
+        const int first=menu.app();
+        menu.apps=true;menu.nextApp(-1);menu.nextApp(1);assert(menu.app()==first);
+        menu.nextSpace(1);assert(!menu.apps && menu.selected==0);
+    }
+    for(bool app:reachable) assert(app);
     assert(hit(Screen::Home,0,0,0).action==Action::None);
     assert(hit(Screen::Home,-32768,-32768,0).action==Action::None);
+    assert(homeCount==10);
+    assert((hit(Screen::System,233,174,2)==Target{Action::Open,2}));
+    assert((hit(Screen::System,233,286,3)==Target{Action::Open,3}));
+    for(int section=0;section<3;++section) {
+        const auto row=settingsRow(section);
+        assert((hit(Screen::SettingsMenu,233,row.y+row.height/2,0)==Target{Action::Open,settingsItems[section][0]}));
+        for(int i=0;i<settingsCount(section);++i) {
+            const int setting=settingsItems[section][i];
+            assert(settingsSection(setting)==section && settingsPosition(setting)==i);
+            const auto bounds=menuRow(i%2);
+            assert((hit(Screen::SettingsSection,233,bounds.y+bounds.height/2,setting)==Target{Action::Open,setting}));
+        }
+    }
+    assert(hit(Screen::UsbControl,233,372,0).action==Action::Select);
+    assert(hit(Screen::UsbControl,112,84,0).action==Action::Back);
+    assert(hit(Screen::UsbControl,233,200,0).action==Action::None);
     assert(hit(Screen::Notes,233,250,0).action==Action::Record);
     assert(hit(Screen::Notes,233,382,0,true).action==Action::Stop);
     assert(hit(Screen::Notes,233,250,0,true).action==Action::None);
     assert(hit(Screen::Settings,233,343,0).action==Action::Slider);
-    for(auto screen:{Screen::FormatConfirm,Screen::ForgetConfirm}) {
+    assert(hit(Screen::Settings,77,264,0).action==Action::Previous);
+    assert(hit(Screen::Settings,389,264,0).action==Action::Next);
+    for(int y=310;y<376;++y) for(int x=84;x<382;++x)
+        assert(hit(Screen::Settings,x,y,0).action==Action::Slider);
+    for(auto screen:{Screen::FormatConfirm,Screen::ForgetConfirm,Screen::SecurityKey}) {
         for(int y=0;y<466;y+=3) for(int x=0;x<466;x+=3) {
             const auto action=hit(screen,x,y,0).action;
             assert(action==Action::None || action==Action::Back);
@@ -172,8 +218,13 @@ void touchNavigation() {
     for(int x=-10;x<480;++x) assert(sliderValue(6,x)==sliderValue(1,x));
     assert(sliderValue(3,109)==15 && sliderValue(3,357)==180);
     for(int x=-10;x<480;++x) assert(sliderValue(3,x)%15==0);
-    assert(sliderValue(4,109)==0 && sliderValue(4,357)==12);
+    assert(sliderValue(4,109)==0 && sliderValue(4,357)==1);
+    assert(sliderValue(4,232)==0 && sliderValue(4,233)==1);
+    for(int x=-10;x<480;++x) assert(sliderValue(4,x)>=0 && sliderValue(4,x)<=1);
     for (size_t i=0;i<sfx::packIds.size();++i) assert(sfx::packIndex(sfx::packIds[i])==int(i));
+    for (const auto* legacy : {"minimal", "soft", "glass", "arcade", "mechanical", "organic",
+                              "dreamy", "scifi", "rubber", "cinematic", "studio", "zen"})
+        assert(sfx::packIndex(legacy)==1);
     assert(sfx::packIndex("unknown")==-1 && sfx::packIndex("")==-1);
     assert(sfx::packIndex(std::string_view("minimal\0other",13))==-1);
     assert(sliderValue(5,109)==0 && sliderValue(5,357)==int(ui::themes.size())-1);
@@ -224,7 +275,7 @@ void quickControls() {
         for(const int x:{panel.x,panel.x+panel.width-1})
             for(const int y:{panel.y,panel.y+panel.height-1})
                 assert((Circle{233,233,232}.contains(x,y)));
-    assert(quietToggle.contains(233,207) && quietToggle.contains(233,300));
+    assert(quietToggle.contains(233,253) && quietToggle.contains(233,300));
     assert(!quietToggle.contains(quickClose.x,quickClose.y));
     const auto swipe=[](int x,int y,int dx,int dy,bool panel=false,bool slider=false) {
         TouchInput input;
@@ -237,10 +288,10 @@ void quickControls() {
     assert(swipe(299,40,-20,52)==GestureKind::QuickOpen);
     assert(swipe(233,64,0,52)==GestureKind::QuickOpen);
     for(const auto point:{std::pair{166,40},std::pair{300,40},std::pair{233,65},std::pair{233,250}})
-        assert(swipe(point.first,point.second,0,100)==GestureKind::None);
+        assert(swipe(point.first,point.second,0,100)==(point.second>=110?GestureKind::Down:GestureKind::None));
     assert(swipe(233,40,0,51)==GestureKind::None);
     assert(swipe(233,40,90,60)==GestureKind::Right);
-    assert(swipe(233,250,0,-70)==GestureKind::None);
+    assert(swipe(233,250,0,-70)==GestureKind::Up);
     assert(swipe(233,250,0,-70,true)==GestureKind::QuickClose);
     assert(swipe(233,250,-100,0,true)==GestureKind::Left);
     assert(swipe(233,343,50,-100,false,true)==GestureKind::Release);

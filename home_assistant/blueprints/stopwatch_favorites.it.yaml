@@ -1,0 +1,195 @@
+blueprint:
+  name: StopWatch — Preferiti
+  description: >-
+    Scegli fino a otto elementi da comandare con A e B sullo StopWatch.
+    Nomi, configurazione e stati vengono sincronizzati automaticamente via MQTT.
+    Lascia vuote le posizioni inutilizzate. Dopo Salva attendi un secondo.
+    Luci, prese e ventilatori cambiano stato; scene e script vengono avviati;
+    sensori e altre entità sono disponibili in sola lettura.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    stopwatch:
+      name: StopWatch
+      selector:
+        device:
+          filter:
+            - integration: mqtt
+              manufacturer: M5Stack
+              model: StopWatch C152
+            - integration: mqtt
+              manufacturer: M5Stack
+              model: StopWatch C152 · firmware personale
+    favorite_1:
+      name: Preferito 1
+      default: ""
+      selector:
+        entity: {}
+    favorite_2:
+      name: Preferito 2
+      default: ""
+      selector:
+        entity: {}
+    favorite_3:
+      name: Preferito 3
+      default: ""
+      selector:
+        entity: {}
+    favorite_4:
+      name: Preferito 4
+      default: ""
+      selector:
+        entity: {}
+    favorite_5:
+      name: Preferito 5
+      default: ""
+      selector:
+        entity: {}
+    favorite_6:
+      name: Preferito 6
+      default: ""
+      selector:
+        entity: {}
+    favorite_7:
+      name: Preferito 7
+      default: ""
+      selector:
+        entity: {}
+    favorite_8:
+      name: Preferito 8
+      default: ""
+      selector:
+        entity: {}
+
+variables:
+  device_id: !input stopwatch
+  slots:
+    - !input favorite_1
+    - !input favorite_2
+    - !input favorite_3
+    - !input favorite_4
+    - !input favorite_5
+    - !input favorite_6
+    - !input favorite_7
+    - !input favorite_8
+  selected: "{{ slots | reject('equalto', '') | unique | list }}"
+  mqtt_id: >-
+    {% set ns = namespace(id='') %}
+    {% for domain, identifier in device_attr(device_id, 'identifiers') or [] %}
+      {% if domain == 'mqtt' and identifier.startswith('stopwatch_') %}
+        {% set ns.id = identifier %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.id }}
+
+triggers:
+  - trigger: event
+    event_type: automation_reloaded
+    id: configure
+  - trigger: homeassistant
+    event: start
+    id: configure
+  - trigger: event
+    event_type:
+      - entity_registry_updated
+      - device_registry_updated
+    id: configure
+  - trigger: mqtt
+    topic: stopwatch/+/availability
+    payload: online
+    id: configure
+  - trigger: mqtt
+    topic: stopwatch/+/favorite/request
+    id: request
+
+conditions:
+  - condition: template
+    value_template: "{{ mqtt_id | regex_match('^stopwatch_[0-9a-f]{12}$') }}"
+  - condition: template
+    value_template: >-
+      {{ trigger is not defined or trigger is none or trigger.platform != 'mqtt'
+         or trigger.topic.split('/')[1] == mqtt_id }}
+
+actions:
+  - choose:
+      - conditions: "{{ trigger is defined and trigger is not none and trigger.id == 'request' }}"
+        sequence:
+          - variables:
+              request: "{{ trigger.payload_json if trigger.payload_json is defined and trigger.payload_json is mapping else {} }}"
+              entity: "{{ request.get('entity', '') }}"
+              domain: "{{ entity.split('.')[0] if entity is string else '' }}"
+              service: >-
+                {{ 'toggle' if domain in ['light', 'switch', 'input_boolean', 'fan']
+                   else 'turn_on' if domain in ['scene', 'script']
+                   else 'press' if domain in ['button', 'input_button'] else '' }}
+          - condition: template
+            value_template: >-
+              {{ entity in selected and request.get('request') is number
+                 and request.get('action') is boolean
+                 and (request.get('brightness', none) is none or
+                      (request.action and entity.startswith('light.')
+                       and request.brightness is integer and 0 <= request.brightness <= 100
+                       and (state_attr(entity, 'supported_color_modes') or [])
+                         | select('in', ['brightness','color_temp','hs','xy','rgb','rgbw','rgbww','white']) | list | count > 0))
+                 and (not request.action or
+                      (service != '' and 0 <= as_timestamp(now()) - (request.get('sent_at', 0) | float(0)) <= 5)) }}
+          - if: "{{ request.action and states(entity) != 'unavailable' }}"
+            then:
+              - variables:
+                  previous_state: "{{ states(entity) }}"
+              - action: >-
+                  {{ 'light.turn_on' if request.get('brightness', none) is not none and request.brightness > 0
+                     else 'light.turn_off' if request.get('brightness', none) == 0
+                     else domain ~ '.' ~ service }}
+                target:
+                  entity_id: "{{ entity }}"
+                data: "{{ {'brightness_pct': request.brightness} if request.get('brightness', none) is not none and request.brightness > 0 else {} }}"
+              - if: "{{ service == 'toggle' or (request is defined and request.get('brightness', none) is not none) }}"
+                then:
+                  - wait_template: >-
+                      {% if request is defined and request.get('brightness', none) is not none %}
+                        {{ states(entity) == 'off' if request.brightness == 0 else
+                           states(entity) == 'on' and state_attr(entity, 'brightness') is number and
+                           (((state_attr(entity, 'brightness') | float) * 100 / 255) - request.brightness) | abs <= 2 }}
+                      {% else %}
+                        {{ states(entity) in ['on','off'] and states(entity) != previous_state }}
+                      {% endif %}
+                    timeout:
+                      seconds: 3
+                    continue_on_timeout: true
+          - action: mqtt.publish
+            data:
+              topic: "stopwatch/{{ mqtt_id }}/favorite/result"
+              qos: 0
+              retain: false
+              payload: >-
+                {% set modes = state_attr(entity, 'supported_color_modes') or [] %}
+                {% set dimmable = entity.startswith('light.') and modes | select('in', ['brightness','color_temp','hs','xy','rgb','rgbw','rgbww','white']) | list | count > 0 %}
+                {% set level = state_attr(entity, 'brightness') %}
+                {{ {'request': request.request, 'entity': entity,
+                    'success': states(entity) not in ['unknown', 'unavailable'],
+                    'state': states(entity)[:64],
+                    'unit': (state_attr(entity, 'unit_of_measurement') or '')[:16],
+                    'dimmable': dimmable,
+                    'brightness': ((level * 100 / 255) | round | int) if dimmable and level is number and 0 <= level <= 255 else -1}
+                   | to_json(ensure_ascii=False) }}
+    default:
+      - delay:
+          seconds: 1
+      - action: mqtt.publish
+        data:
+          topic: "stopwatch/{{ mqtt_id }}/favorites/config"
+          qos: 1
+          retain: true
+          payload: >-
+            {% set ns = namespace(items=[]) %}
+            {% for entity in selected %}
+              {% set label = (state_attr(entity, 'friendly_name') or entity)[:32] %}
+              {% set ns.items = ns.items + [dict(entity=entity, label=label)] %}
+            {% endfor %}
+            {{ {'favorites': ns.items} | to_json(ensure_ascii=False) }}
+
+mode: parallel
+max: 20
+max_exceeded: silent

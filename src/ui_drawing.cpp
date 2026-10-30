@@ -61,6 +61,24 @@ void icon(M5Canvas& c, Icon name, int cx, int cy, int size, uint32_t color, uint
         }
     };
     switch(name) {
+    case Icon::Display:
+        c.drawRoundRect(cx-size/2,cy-size/3,size,size*2/3,std::max(2,size/12),color);
+        c.drawWideLine(cx,cy+size/3,cx,cy+size/2,1.3,color);
+        c.drawWideLine(cx-size/5,cy+size/2,cx+size/5,cy+size/2,1.3,color);break;
+    case Icon::Focus:
+        c.drawRoundRect(cx-size/3,cy-size/3,size*2/3,size*2/3,std::max(3,size/6),color);
+        c.fillSmoothCircle(cx,cy,size/8,color);break;
+    case Icon::Charging:
+        stroke(3,6,20,6);stroke(20,6,20,18);stroke(20,18,3,18);stroke(3,18,3,6);stroke(23,10,23,14);
+        stroke(13,8,9,12);stroke(9,12,14,12);stroke(14,12,10,16);
+        break;
+    case Icon::Key:
+        arc(8,8,5,0,360);stroke(11.5,11.5,21,21);stroke(17,17,20,14);stroke(19,19,22,16);break;
+    case Icon::Usb:
+        stroke(12,21,12,3);stroke(12,3,9,6);stroke(12,3,15,6);
+        stroke(12,16,6,12);stroke(6,12,6,8);arc(6,6,2,0,360);
+        stroke(12,12,18,9);stroke(18,9,18,5);stroke(16,3,20,3);stroke(20,3,20,7);stroke(20,7,16,7);stroke(16,7,16,3);
+        arc(12,21,1.5,0,360);break;
     case Icon::Moon:
         c.fillSmoothCircle(x(12),y(12),9*scale,color);
         c.fillSmoothCircle(x(16),y(8),8*scale,bg);break;
@@ -121,6 +139,10 @@ void icon(M5Canvas& c, Icon name, int cx, int cy, int size, uint32_t color, uint
     case Icon::Link:
         arc(8,12,5,90,270);arc(16,12,5,270,450);stroke(8,7,12,7);stroke(12,17,16,17);stroke(8,12,16,12);break;
     }
+}
+void connectionIcon(M5Canvas& c,int cx,int cy,bool wifi,bool phone,uint32_t bg) {
+    icon(c,wifi?Icon::Wifi:phone?Icon::Bluetooth:Icon::Link,cx,cy,18,wifi || phone?navigation:muted,bg);
+    if(!wifi && !phone) c.drawWideLine(cx-9,cy+9,cx+9,cy-9,1.2,muted);
 }
 void circleButton(M5Canvas& c, Circle target, Icon name, int size, uint32_t fill, uint32_t color) {
     c.fillSmoothCircle(target.x,target.y,target.radius,fill);

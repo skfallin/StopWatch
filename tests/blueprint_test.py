@@ -21,6 +21,37 @@ BLUEPRINT = yaml.load(
 
 
 class BlueprintTests(unittest.TestCase):
+    def test_brightness_capability_validation_action_and_confirmation(self):
+        self.setUp()
+        attributes = {"supported_color_modes": ["rgb"], "brightness": 153}
+        self.env.globals["state_attr"] = lambda entity, key: attributes.get(key)
+        sequence = BLUEPRINT["actions"][0]["choose"][0]["sequence"]
+        now = self.env.globals["now"]().timestamp()
+        request = {"request": 12, "action": True, "brightness": 60, "sent_at": now}
+        values = dict(entity="light.camera", request=request, service="toggle", selected=["light.camera"], domain="light")
+        self.assertEqual(self.render(sequence[1]["value_template"], **values), "True")
+        action = sequence[2]["then"][1]
+        self.assertEqual(self.render(action["action"], **values), "light.turn_on")
+        self.assertEqual(self.render(action["data"], **values), "{'brightness_pct': 60}")
+        wait = sequence[2]["then"][2]["then"][0]["wait_template"]
+        self.env.globals["states"] = lambda entity: "on"
+        self.assertEqual(self.render(wait, **values), "True")
+        attributes["brightness"] = 255
+        self.assertEqual(self.render(wait, **values), "False")
+        payload = json.loads(self.render(sequence[3]["data"]["payload"], **values))
+        self.assertTrue(payload["dimmable"]); self.assertEqual(payload["brightness"], 100)
+        for level in [-1, 101, True, 1.5, "50"]:
+            request["brightness"] = level
+            self.assertEqual(self.render(sequence[1]["value_template"], **values), "False")
+        request["brightness"] = 0
+        self.assertEqual(self.render(action["action"], **values), "light.turn_off")
+        self.assertEqual(self.render(action["data"], **values), "{}")
+        self.env.globals["states"] = lambda entity: "off"
+        self.assertEqual(self.render(wait, **values), "True")
+        attributes["supported_color_modes"] = ["onoff"]
+        self.assertEqual(self.render(sequence[1]["value_template"], **values), "False")
+        payload = json.loads(self.render(sequence[3]["data"]["payload"], **values))
+        self.assertFalse(payload["dimmable"]); self.assertEqual(payload["brightness"], -1)
     def setUp(self):
         self.env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         self.env.filters["to_json"] = lambda value, **kwargs: json.dumps(value, **kwargs)

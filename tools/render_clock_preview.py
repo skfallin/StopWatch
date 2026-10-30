@@ -10,19 +10,35 @@ output = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/stopwatch-clock-previe
 output.mkdir(parents=True, exist_ok=True)
 music = "--music" in sys.argv
 quick = "--quick" in sys.argv
+scene = "--scene" in sys.argv
+productivity = "--productivity" in sys.argv
 source = (root / "src/ui_drawing.cpp").read_text()
 start, end = source.index("void icon("), source.index("void dots(")
 (output / "drawing_primitives.inc").write_text(source[start:end])
+if scene:
+    main = (root / "src/main.cpp").read_text()
+    def function(signature):
+        start = main.index(signature + " {")
+        return main[start:main.index("\n}", start) + 2]
+    constants = "\n".join(line for line in main.splitlines() if line.startswith("const char* setting"))
+    views = "\n".join(function(name) for name in (
+        "void header(const char* title)", "int settingValue()", "void drawStatus()",
+        "void drawSystem()", "String settingSummary(int item)", "void drawSettingsMenu()",
+        "void drawSettingsSection()", "void drawSettings()", "void drawLight()", "void arrows()", "void drawCasa()"))
+    (output / "scene_settings.inc").write_text(constants + "\n" + views.replace('entity.startsWith("light.")', 'entity.rfind("light.",0)==0'))
+    font = ImageFont.truetype(str(root / "assets/fonts/InterVariable.ttf"), 18)
+    font.set_variation_by_axes([400 if a["name"] == b"Weight" else min(32, a["maximum"]) for a in font.get_variation_axes()])
+    (output / "scene_widths.inc").write_text("constexpr int sceneWidths[128]={" + ",".join(str(round(font.getlength(chr(c)))) if c >= 32 else "0" for c in range(128)) + "};\n")
 binary = output / "clock-render"
 subprocess.run([
     "clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
     "-I" + str(root / "tests/render"), "-I" + str(root / "include"),
     "-I" + str(root / "src"), "-I" + str(output),
-    str(root / ("src/quick_settings_view.cpp" if quick else "src/music_view.cpp" if music else "src/clock_view.cpp")),
-    str(root / ("tests/render/quick_render.cpp" if quick else "tests/render/music_render.cpp" if music else "tests/render/clock_render.cpp")),
+    str(root / ("src/productivity_view.cpp" if productivity else "src/scene_view.cpp" if scene else "src/quick_settings_view.cpp" if quick else "src/music_view.cpp" if music else "src/clock_view.cpp")),
+    str(root / ("tests/render/productivity_render.cpp" if productivity else "tests/render/scene_render.cpp" if scene else "tests/render/quick_render.cpp" if quick else "tests/render/music_render.cpp" if music else "tests/render/clock_render.cpp")),
     "-o", str(binary)
 ], check=True)
-subprocess.run([str(binary), str(output)], check=True)
+subprocess.run([str(binary), str(output), "it" if "--italian" in sys.argv else "en"], check=True)
 
 scale = 2
 sizes = (18, 22, 28, 36, 68, 96)
@@ -49,9 +65,15 @@ for path in sorted(output.glob("*.jsonl")):
     draw = ImageDraw.Draw(image)
     for line in path.read_text().splitlines():
         kind, *values = json.loads(line)
-        if kind == "rect":
+        if kind in ("rect", "outline"):
             x, y, w, h, radius, rgb = values
-            draw.rounded_rectangle((x * scale, y * scale, (x + w) * scale, (y + h) * scale), radius * scale, fill=color(rgb))
+            draw.rounded_rectangle((x * scale, y * scale, (x + w) * scale, (y + h) * scale), radius * scale,
+                                   **({"fill": color(rgb)} if kind == "rect" else {"outline": color(rgb), "width": scale}))
+        elif kind == "pixels":
+            x, y, w, h, pixels = values
+            patch = Image.new("RGB", (w, h))
+            patch.putdata([((p >> 11) * 255 // 31, (p >> 5 & 63) * 255 // 63, (p & 31) * 255 // 31) for p in pixels])
+            image.paste(patch.resize((w * scale, h * scale), Image.Resampling.NEAREST), (x * scale, y * scale))
         elif kind == "circle":
             x, y, radius, rgb = values
             draw.ellipse(((x-radius)*scale, (y-radius)*scale, (x+radius)*scale, (y+radius)*scale), fill=color(rgb))
@@ -96,10 +118,18 @@ def sheet(name, frames):
         draw.text((x+tile/2, y+tile+24), caption, font=font, anchor="mm", fill="#f4f6f0")
     result.save(output/name)
 
-if quick:
+if scene:
+    sheet("scene.png", [("scene-0-0", "Casa"), ("scene-1-0", "Tasca"), ("scene-2-0", "Strumenti"),
+          ("system", "Sistema"), ("settings", "Impostazioni"), ("charging", "In carica")])
+    sheet("scene-settings.png", [("settings-section-0", "Display"), ("settings-section-1", "Audio"),
+          ("settings-audio-2", "Audio · pagina 2"), ("slider-0", "Slider invariato"),
+          ("slider-5", "Colori"), ("notice", "Avvisi uniformi")])
+elif quick:
     sheet("quick-settings.png", [("quick-off", "Disattivato"), ("quick-on", "Silenzio completo"),
           ("quick-pending", "Salvataggio dopo la nota"), ("quick-failed", "Errore di salvataggio"),
           ("quick-buttons", "Palette dei pulsanti"), ("quick-violet", "Palette viola")])
+elif productivity:
+    sheet("productivity.png", [("focus-0", "Focus · pronto"), ("focus-1", "Concentrazione"), ("focus-2", "In pausa"), ("focus-3", "Sessione completata"), ("slides-connected", "Slide · USB"), ("slides-offline", "Slide · collega USB")])
 elif music:
     sheet("music.png", [("playing", "In ascolto"), ("paused", "In pausa"), ("devices", "Lettori Spotify Connect"),
           ("offline", "Connessione interrotta"), ("waiting", "Invio comando"), ("empty", "Nessun brano")])

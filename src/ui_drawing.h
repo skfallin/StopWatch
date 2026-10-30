@@ -11,7 +11,8 @@ inline uint32_t focusPanel=themes[0].focusPanel, navigation=themes[0].navigation
 inline uint32_t selectionSurface=themes[0].selectionSurface;
 enum class Font { Small, Body, Label, Title, Clock, Number };
 enum class Icon { House, Mic, Sliders, Sun, Activity, Bluetooth, Wifi, Back, Next,
-                  Play, Check, Bulb, Speaker, Archive, Warning, Clock, Link, Close, Badge, Timer, Stopwatch, Music, Moon };
+                  Play, Check, Bulb, Speaker, Archive, Warning, Clock, Link, Close, Badge, Timer, Stopwatch, Music, Moon, Usb, Key, Charging, Display, Focus };
+void connectionIcon(M5Canvas& canvas,int x,int y,bool wifi,bool phone,uint32_t background=black);
 bool beginFonts();
 void setTheme(uint8_t index);
 int textWidth(M5Canvas& canvas, const String& value, Font font);

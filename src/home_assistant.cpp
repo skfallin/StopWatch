@@ -1,4 +1,6 @@
+#include "i18n.h"
 #include "home_assistant.h"
+#include "light_control.h"
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -19,10 +21,11 @@ bool HomeAssistant::begin() {
     return false;
 }
 
-bool HomeAssistant::request(const Settings& settings, size_t favorite, bool action) {
+bool HomeAssistant::request(const Settings& settings, size_t favorite, bool action,int brightness) {
     if (busy_ || !requests_ || favorite >= settings.favoriteCount) return false;
+    if(brightness< -1 || brightness>100 || (brightness>=0 && (!action || !settings.favorites[favorite].entity.startsWith("light.")))) return false;
     auto* job = new (std::nothrow) Request{settings.haUrl, settings.haToken, settings.haCa,
-                                         settings.favorites[favorite].entity, favorite, action, millis()};
+                                         settings.favorites[favorite].entity, favorite, action, millis(),brightness};
     if (!job) return false;
     if (xQueueSend(requests_, &job, 0) != pdTRUE) { delete job; return false; }
     busy_ = true;
@@ -55,17 +58,17 @@ HomeResult HomeAssistant::perform(const Request& request) {
     result.action = request.action;
     result.entity = request.entity;
     result.requestedAt = request.requestedAt;
-    if (WiFi.status() != WL_CONNECTED) { result.message = "Wi-Fi non connesso"; return result; }
-    if (request.url.isEmpty() || request.token.isEmpty()) { result.message = "Configura Home Assistant dal telefono"; return result; }
+    if (WiFi.status() != WL_CONNECTED) { result.message = i18n::text("Wi-Fi non connesso"); return result; }
+    if (request.url.isEmpty() || request.token.isEmpty()) { result.message = i18n::text("Configura Home Assistant dal telefono"); return result; }
     if (!policy::baseUrl(request.url.c_str()) || !policy::entityId(request.entity.c_str())) {
-        result.message = "Configurazione Home Assistant non valida"; return result;
+        result.message = i18n::text("Configurazione Home Assistant non valida"); return result;
     }
     WiFiClient plain;
     WiFiClientSecure secure;
     WiFiClient* transport = &plain;
     if (request.url.startsWith("https://")) {
         if (time(nullptr) < 1704067200) {
-            result.message = "HTTPS richiede l'orologio sincronizzato"; return result;
+            result.message = i18n::text("HTTPS richiede l'orologio sincronizzato"); return result;
         }
         if (request.ca.isEmpty()) secure.setCACertBundle(builtinCaStart, builtinCaEnd - builtinCaStart);
         else secure.setCACert(request.ca.c_str());
@@ -82,23 +85,24 @@ HomeResult HomeAssistant::perform(const Request& request) {
         return true;
     };
     if (request.action) {
-        const auto service = policy::service(request.entity.c_str());
-        if (service.empty()) { result.message = "Entita in sola lettura"; return result; }
+        const auto service = request.brightness>=0?std::string_view(request.brightness?"turn_on":"turn_off"):policy::service(request.entity.c_str());
+        if (service.empty()) { result.message = i18n::text("Entita in sola lettura"); return result; }
         HTTPClient http;
         const String domain = request.entity.substring(0, request.entity.indexOf('.'));
         if (!configure(http, String("/api/services/") + domain + "/" + String(service.data(), service.size()))) {
-            result.message = "Connessione Home Assistant fallita"; return result;
+            result.message = i18n::text("Connessione Home Assistant fallita"); return result;
         }
         http.addHeader("Content-Type", "application/json");
         JsonDocument data;
         data["entity_id"] = request.entity;
+        if(request.brightness>0) data["brightness_pct"]=request.brightness;
         String body;
         serializeJson(data, body);
         const int status = http.POST(body);
         http.end();
         if (status < 0) {
             // A timeout can happen after HA executed a toggle. Never retry it automatically.
-            result.message = "Esito incerto: verifica in Home Assistant"; return result;
+            result.message = i18n::text("Esito incerto: verifica in Home Assistant"); return result;
         }
         if (status != 200 && status != 201) {
             result.message = String("Home Assistant: HTTP ") + status; return result;
@@ -106,12 +110,12 @@ HomeResult HomeAssistant::perform(const Request& request) {
     }
     HTTPClient http;
     if (!configure(http, String("/api/states/") + request.entity)) {
-        result.message = request.action ? "Comando inviato, stato non disponibile" : "Connessione fallita";
+        result.message = request.action ? i18n::text("Comando inviato, stato non disponibile") : i18n::text("Connessione fallita");
         return result;
     }
     const int status = http.GET();
     if (status != 200 || http.getSize() > 16384) {
-        result.message = request.action ? "Comando inviato, aggiorna lo stato" : String("Lettura fallita: HTTP ") + status;
+        result.message = request.action ? i18n::text("Comando inviato, aggiorna lo stato") : String(i18n::text("Lettura fallita: HTTP ")) + status;
         http.end(); return result;
     }
     String body;
@@ -129,15 +133,22 @@ HomeResult HomeAssistant::perform(const Request& request) {
     filter["entity_id"] = true;
     filter["state"] = true;
     filter["attributes"]["unit_of_measurement"] = true;
+    filter["attributes"]["brightness"] = true;
+    filter["attributes"]["supported_color_modes"] = true;
     JsonDocument data;
     if (body.length() >= 16384 || deserializeJson(data, body, DeserializationOption::Filter(filter)) ||
         !data["state"].is<const char*>() || data["entity_id"].as<String>()!=request.entity) {
-        result.message = request.action ? "Comando inviato, risposta non valida" : "Risposta Home Assistant non valida";
+        result.message = request.action ? i18n::text("Comando inviato, risposta non valida") : i18n::text("Risposta Home Assistant non valida");
         return result;
     }
     result.state = data["state"].as<String>().substring(0, 64);
     result.unit = data["attributes"]["unit_of_measurement"].as<String>().substring(0, 16);
+    if(request.entity.startsWith("light.")) {
+        for(auto mode:data["attributes"]["supported_color_modes"].as<JsonArrayConst>())
+            if(mode.is<const char*>() && casa::brightnessMode(mode.as<const char*>())) result.dimmable=true;
+        if(result.dimmable && data["attributes"]["brightness"].is<int>()) result.brightness=casa::brightnessPercent(data["attributes"]["brightness"].as<int>());
+    }
     result.success = true;
-    result.message = request.action ? "Comando inviato" : "Stato aggiornato";
+    result.message = request.action ? i18n::text("Comando inviato") : i18n::text("Stato aggiornato");
     return result;
 }

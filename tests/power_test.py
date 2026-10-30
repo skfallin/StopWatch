@@ -11,6 +11,7 @@ def function(path, signature):
     return source[start:source.index("\n}", start) + 2]
 
 harness = r'''
+#include "i18n.h"
 #include <atomic>
 #include <algorithm>
 #include <ArduinoJson.h>
@@ -25,7 +26,7 @@ harness = r'''
 using String=std::string;
 uint32_t now=1000,lastCpuWork=0,frequency=240;
 bool screenOff=false,cpuScaling=true,clockWorks=true;
-enum class Screen { Home,Diagnostics,Clock,Badge,Timer,Stopwatch };
+enum class Screen { Home,Diagnostics,Clock,Badge,Timer,Stopwatch,SecurityKey,Focus,Slides };
 Screen screen=Screen::Home;
 bool quickPanelOpen=false,dirty=false;
 size_t diagnostic=0;
@@ -47,7 +48,8 @@ bool setCpuFrequencyMhz(uint32_t value) {
 }
 struct { template<typename... T> void printf(const char*,T...) {} void println(const char*) {} } Serial;
 struct Work {
-    bool work=false;
+    bool work=false,linked=false;
+    bool connected() const { return linked; }
     bool busy() const { return work; }
     bool hasWork() const { return work; }
     bool pending() const { return work; }
@@ -61,6 +63,8 @@ struct : Work {
     bool animated() const { return animatedFlag; }
     uint32_t lastMotion() const { return motionAt; }
 } badgeApp;
+Work usbControl;
+namespace security_key { bool busyFlag=false; bool busy() { return busyFlag; } bool awaitingFlag=false; bool awaiting() { return awaitingFlag; } bool connectedFlag=false; bool connected() { return connectedFlag; } }
 struct : Work { bool playingFlag=false;bool playing() const { return playingFlag; } } notes;
 struct {
     struct { bool playing=false;bool isPlaying() const { return playing; } } Speaker;
@@ -112,7 +116,7 @@ harness += function("src/main.cpp", "void updateCpu(uint32_t now,bool working,bo
 harness += function("src/main.cpp", "bool cpuWorkPending()")
 source = (root / "src/main.cpp").read_text()
 start = source.index("        const bool batteryDiagnostic=")
-end = source.index("        if(!screenOff", start + 8)
+end = source.index("        updateCharging(now);", start)
 harness += "void batteryTick() {\n" + source[start:end] + "}\n"
 start = source.index("    const bool keepDisplayOn=")
 end = source.index("    if (!screenOff && !keepDisplayOn", start)
@@ -138,11 +142,13 @@ int main() {
     updateCpu(now,false);assert(changes.size()==1);
     screenOff=false;updateCpu(now,cpuWorkPending());assert(frequency==240);
     screenOff=true;idle();
-    for(Work* work:{&home,&homeCommand,&portal,static_cast<Work*>(&badgeApp),&mqtt,&musicArtwork,static_cast<Work*>(&notes),&companion.relay_}) {
+    for(Work* work:{&home,&homeCommand,&portal,static_cast<Work*>(&badgeApp),&mqtt,&musicArtwork,&usbControl,static_cast<Work*>(&notes),&companion.relay_}) {
         companion.authenticated_=companion.subscribed_=true;
         work->work=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
         work->work=false;idle();
     }
+    security_key::busyFlag=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
+    security_key::busyFlag=false;idle();
     notes.playingFlag=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
     notes.playingFlag=false;idle();
     M5.Speaker.playing=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
@@ -181,6 +187,7 @@ int main() {
     now=36499;batteryTick();assert(M5.Power.reads==3);
     now=36500;batteryTick();assert(M5.Power.reads==4);
     cpuScaling=clockWorks=true;frequency=240;now=100000;lastCpuWork=now;
+    for(auto passive:{Screen::Focus,Screen::Slides}) { screen=passive;idle();assert(frequency==80); }
     screen=Screen::Clock;idle();
     const auto lastInteractionBoost=lastCpuWork;
     for(int frame=0;frame<120;++frame) {
@@ -205,7 +212,7 @@ int main() {
     updateCpu(++now,cpuWorkPending());assert(frequency==80);
     badgeApp.availableFlag=false;updateCpu(++now,cpuWorkPending());assert(frequency==240);
     badgeApp.availableFlag=true;
-    for(Work* work:{&home,&homeCommand,&portal,&mqtt,&musicArtwork,static_cast<Work*>(&notes),static_cast<Work*>(&badgeApp),&companion.relay_}) {
+    for(Work* work:{&home,&homeCommand,&portal,&mqtt,&musicArtwork,&usbControl,static_cast<Work*>(&notes),static_cast<Work*>(&badgeApp),&companion.relay_}) {
         companion.authenticated_=companion.subscribed_=true;
         work->work=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
         work->work=false;companion.notesChanged_=false;idle();
@@ -223,6 +230,12 @@ int main() {
     assert(dimTick() && !displayDimmed);
     now+=20001;assert(dimTick() && displayDimmed);
     quickPanelOpen=true;assert(dimTick() && !displayDimmed);quickPanelOpen=false;
+    screen=Screen::Slides;usbControl.linked=true;lastInteraction=now;assert(dimTick() && !displayDimmed);
+    now+=20001;assert(dimTick() && displayDimmed && M5.Display.brightness==48);
+    usbControl.linked=false;assert(!dimTick() && !displayDimmed);
+    screen=Screen::SecurityKey;security_key::connectedFlag=true;assert(dimTick());
+    security_key::connectedFlag=false;assert(!dimTick());
+    security_key::awaitingFlag=true;assert(dimTick());security_key::awaitingFlag=false;
     JsonDocument input,output;String error;
     settings.clockKeepAwake=true;assert(updateClock(input.to<JsonObject>(),error) && settings.clockKeepAwake);
     for(const auto* invalid:{"null","0","1","\"true\"","{}","[]"}) {
@@ -240,6 +253,6 @@ with tempfile.TemporaryDirectory(prefix="stopwatch-power-") as temporary:
     source.write_text(harness)
     binary = Path(temporary) / "test"
     subprocess.run(["clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
-                    "-fsanitize=address,undefined", "-I" + str(root / ".pio/libdeps/stopwatch/ArduinoJson/src"),
+                    "-fsanitize=address,undefined", "-I"+str(root / "include"), "-I" + str(root / ".pio/libdeps/stopwatch/ArduinoJson/src"),
                     str(source), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

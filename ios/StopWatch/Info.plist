@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<string>en</string>
 	<key>CFBundleDisplayName</key>
 	<string>StopWatch</string>
 	<key>CFBundleExecutable</key>
@@ -12,6 +12,11 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>it</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
@@ -26,11 +31,11 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Collega il tuo StopWatch per gestire impostazioni, casa e note vocali.</string>
+	<string>Connect your StopWatch to manage settings, home controls and voice notes.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Invia immagini e GIF al Badge e ricevi rapidamente le note vocali dal tuo StopWatch tramite la rete Wi-Fi locale.</string>
+	<string>Send Badge images and GIFs and receive voice notes from StopWatch over your local Wi-Fi network.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Trasforma in testo le note registrate sul tuo StopWatch. La trascrizione avviene su questo iPhone.</string>
+	<string>Transcribe notes recorded on StopWatch. Transcription happens on this iPhone.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

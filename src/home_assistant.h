@@ -10,13 +10,15 @@ struct HomeResult {
     bool success = false;
     bool action = false;
     bool viaMqtt = false;
+    bool dimmable = false;
+    int brightness = -1;
     String entity, state, unit, message;
 };
 
 class HomeAssistant {
 public:
     bool begin();
-    bool request(const Settings& settings, size_t favorite, bool action);
+    bool request(const Settings& settings, size_t favorite, bool action,int brightness=-1);
     bool poll(HomeResult& result);
     bool busy() const { return busy_; }
 
@@ -26,6 +28,7 @@ private:
         size_t favorite;
         bool action;
         uint32_t requestedAt;
+        int brightness;
     };
     static void worker(void* context);
     static HomeResult perform(const Request& request);

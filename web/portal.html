@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StopWatch · Companion</title><style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101416;color:#edf3f5}*{box-sizing:border-box}
+body{max-width:720px;margin:auto;padding:24px 18px 60px}h1{font-size:2rem;margin-bottom:4px}h2{font-size:1.2rem}
+p,small{color:#b8c6cb;line-height:1.5}section{margin:24px 0;padding:20px;background:#1a2327;border-radius:18px}
+label{display:block;margin:16px 0 6px}input,textarea,select,button{font:inherit;border-radius:9px;padding:12px}
+input,textarea,select{width:100%;background:#10191c;color:inherit;border:1px solid #60767f}textarea{min-height:90px}
+button{border:0;background:#b8efb8;color:#102314;cursor:pointer;min-height:44px;margin:8px 8px 0 0}
+button.secondary{background:#34474f;color:#fff}button.danger{background:#5a2930;color:#fff}
+button:disabled{opacity:.5;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #80cfff;outline-offset:3px}
+.favorite{border-top:1px solid #43545b;padding:8px 0}.note{border-top:1px solid #43545b;padding:12px 0;overflow-wrap:anywhere}
+#message{position:sticky;top:8px;padding:12px;border-radius:8px;background:#253a43;z-index:1;white-space:pre-wrap}
+#message:empty{display:none}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:480px){.grid{grid-template-columns:1fr}}
+</style></head><body>
+<h1>StopWatch</h1><p data-i18n="Companion locale · Configurazione e note vocali">Local companion · Configuration and voice notes</p>
+<div id="message" role="status" aria-live="polite"></div>
+<p id="status" data-i18n="Connessione al dispositivo…">Connecting to device…</p>
+<form id="settings"><fieldset id="fields" style="padding:0;border:0" disabled>
+<section><h2 data-i18n="Lingua e fuso orario">Language and time zone</h2>
+<label for="language" data-i18n="Lingua">Language</label><select id="language"><option value="en">English</option><option value="it">Italiano</option></select>
+<label for="time_zone" data-i18n="Fuso orario">Time zone</label><select id="time_zone"></select></section>
+<section><h2 data-i18n="Display, suono e vibrazione">Display, sound and vibration</h2><div class="grid">
+<div><label for="brightness" data-i18n="Luminosità (16–255)">Brightness (16–255)</label><input id="brightness" type="number" min="16" max="255" required></div>
+<div><label for="volume" data-i18n="Volume interazioni (0–200)">Interface volume (0–200)</label><input id="volume" type="number" min="0" max="200" required></div>
+<div><label for="note_volume" data-i18n="Volume ascolto note (0–200)">Note playback volume (0–200)</label><input id="note_volume" type="number" min="0" max="200" required></div>
+<div><label for="vibration" data-i18n="Vibrazione (0–255)">Vibration (0–255)</label><input id="vibration" type="number" min="0" max="255" required></div>
+<div><label for="screen_timeout" data-i18n="Spegnimento display (secondi)">Display timeout (seconds)</label><input id="screen_timeout" type="number" min="15" max="300" required></div>
+</div></section>
+<section><h2>Wi-Fi</h2><label for="ssid" data-i18n="Nome della rete 2,4 GHz">2.4 GHz network name</label><input id="ssid" maxlength="32" autocomplete="off">
+<label for="wifi_password">Password</label><input id="wifi_password" type="password" maxlength="63" autocomplete="new-password">
+<small data-i18n="Se mantieni la rete e lasci vuoto, conserviamo la password. Per una rete diversa, vuoto indica una rete aperta.">Keep the same network and leave the password empty to preserve it. For a different network, an empty password means an open network.</small></section>
+<section><h2>Home Assistant</h2><label for="ha_url" data-i18n="Indirizzo del server">Server address</label><input id="ha_url" type="url" placeholder="http://192.168.1.20:8123" maxlength="256">
+<label for="ha_token" data-i18n="Token di accesso a lunga durata">Long-lived access token</label><input id="ha_token" type="password" maxlength="2048" autocomplete="new-password">
+<small data-i18n="Crealo nel tuo profilo Home Assistant → Sicurezza. Vuoto conserva il token già salvato. Svuotare l&#x27;indirizzo disattiva l&#x27;integrazione.">Create it in your Home Assistant profile → Security. Leave empty to preserve the saved token. Clearing the address disables the integration.</small>
+<details><summary style="margin-top:16px" data-i18n="CA privata per HTTPS · facoltativa">Private CA for HTTPS · optional</summary><label for="ha_ca" data-i18n="CA del server, formato PEM">Server CA, PEM format</label><textarea id="ha_ca" maxlength="4096" spellcheck="false"></textarea>
+<small data-i18n="Lascia vuoto con un certificato pubblico valido. Per HTTP usa esclusivamente una rete locale fidata.">Leave empty with a valid public certificate. Use HTTP only on a trusted local network.</small></details>
+<h2 data-i18n="Preferiti">Favorites</h2><p data-i18n="Fino a 8 entità. Luci, interruttori, input_boolean e ventole: toggle; scene e script: attiva; pulsanti: premi. Le altre entità sono in sola lettura.">Up to 8 entities. Lights, switches, input_boolean and fans: toggle; scenes and scripts: activate; buttons: press. Other entities are read-only.</p>
+<div id="favorites"></div><button type="button" id="add" class="secondary" data-i18n="Aggiungi preferito">Add favorite</button></section>
+<button type="submit" data-i18n="Salva sul dispositivo">Save to device</button>
+</fieldset></form>
+<section><h2 data-i18n="Note vocali">Voice notes</h2><p data-i18n="Tieni premuto B sullo StopWatch, parla quando compare REC e rilascia per salvare. Le note sono audio WAV locali. Il Companion iPhone può trascriverle sul telefono.">Hold B on StopWatch, speak when REC appears and release to save. Notes are local WAV files. iPhone Companion can transcribe them on the phone.</p>
+<button id="refresh" type="button" class="secondary" data-i18n="Aggiorna elenco">Refresh list</button><div id="notes"></div></section>
+<script>
+
+'use strict';
+const translations = /* TRANSLATIONS */;
+let language = 'en', currentStatus = null, currentConfig = null;
+function tr(key, values = {}) {
+  const text = language === 'it' ? key : (translations[key] ?? key);
+  return text.replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match);
+}
+function applyLanguage(value) {
+  language = value === 'it' ? 'it' : 'en';
+  document.documentElement.lang = language;
+  document.querySelectorAll('[data-i18n]').forEach(node => { node.textContent = tr(node.dataset.i18n); });
+  if (currentStatus) showStatus(currentStatus);
+  if (currentConfig) {
+    $('wifi_password').placeholder = currentConfig.wifi_password_saved ? tr('Password salvata') : tr('Nessuna password salvata');
+    $('ha_token').placeholder = currentConfig.ha_token_saved ? tr('Token salvato') : tr('Inserisci il token');
+  }
+}
+
+const $ = id => document.getElementById(id);
+let downloading = false, favoriteId = 0;
+function message(text) { $('message').textContent = text; }
+async function api(path, options = {}) {
+  const response = await fetch(path, {cache:'no-store', ...options,
+    headers:{'X-StopWatch':'1', ...(options.body ? {'Content-Type':'application/json'} : {}), ...options.headers}});
+  if (!response.ok) {
+    let text = tr('Richiesta fallita ({status})', {status: response.status});
+    try { text = (await response.json()).error || text; } catch (_) {}
+    throw new Error(text);
+  }
+  return response;
+}
+function addFavorite(value = {label:'',entity:''}) {
+  if ($('favorites').children.length >= 8) return;
+  const row = document.createElement('div'); row.className = 'favorite';
+  for (const [key, label, limit] of [['label','Nome visualizzato',32],['entity','Entity ID',96]]) {
+    const id = `favorite-${++favoriteId}-${key}`;
+    const caption = document.createElement('label'); caption.htmlFor = id; caption.dataset.i18n = label; caption.textContent = tr(label);
+    const input = document.createElement('input'); input.id = id; input.dataset.key = key; input.value = value[key]; input.maxLength = limit; input.required = true;
+    row.append(caption,input);
+  }
+  const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger'; remove.dataset.i18n = 'Rimuovi preferito'; remove.textContent = tr('Rimuovi preferito');
+  remove.onclick = () => row.remove(); row.append(remove); $('favorites').append(row);
+}
+$('language').onchange = () => applyLanguage($('language').value);
+$('add').onclick = () => addFavorite();
+$('settings').onsubmit = async event => {
+  event.preventDefault(); const config = {language: $('language').value, time_zone: $('time_zone').value};
+  for (const key of ['brightness','volume','note_volume','vibration','screen_timeout']) config[key] = Number($(key).value);
+  for (const key of ['ssid','wifi_password','ha_url','ha_token','ha_ca']) config[key] = $(key).value;
+  config.favorites = [...$('favorites').children].map(row => Object.fromEntries([...row.querySelectorAll('input')].map(input => [input.dataset.key,input.value])));
+  $('fields').disabled = true;
+  try { await api('/api/config',{method:'PUT',body:JSON.stringify(config)}); $('wifi_password').value = ''; $('ha_token').value = ''; message(tr('Configurazione salvata. Se hai cambiato rete, attendi la connessione sullo StopWatch.')); }
+  catch (error) { message(error.message); }
+  finally { $('fields').disabled = false; }
+};
+async function loadNotes() {
+  const data = await (await api('/api/notes')).json(); $('notes').replaceChildren(); $('notes').removeAttribute('data-i18n');
+  if (!data.notes.length) { $('notes').dataset.i18n = 'Nessuna nota salvata.'; $('notes').textContent = tr('Nessuna nota salvata.'); }
+  for (const note of data.notes) {
+    const row = document.createElement('div'); row.className = 'note';
+    const label = document.createElement('div'); label.textContent = `${note.name} · ${Math.round(note.seconds)} s`;
+    const download = document.createElement('button'); download.type = 'button'; download.dataset.i18n = 'Scarica WAV'; download.textContent = tr('Scarica WAV');
+    download.onclick = async () => {
+      if (downloading) return; downloading = true; download.disabled = true;
+      try {
+        const chunks = []; let offset = 0;
+        while (offset < note.bytes) {
+          const response = await api(`/api/note?name=${encodeURIComponent(note.name)}&offset=${offset}`);
+          const chunk = await response.arrayBuffer(); if (!chunk.byteLength) throw new Error(tr('Download interrotto'));
+          chunks.push(chunk); offset += chunk.byteLength;
+        }
+        if (offset !== note.bytes) throw new Error(tr('Dimensione del file inattesa'));
+        const url = URL.createObjectURL(new Blob(chunks,{type:'audio/wav'}));
+        const link = document.createElement('a'); link.href = url; link.download = note.name; link.dataset.i18n = 'Apri / salva audio'; link.textContent = tr('Apri / salva audio');
+        row.append(link); link.click(); setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 300000);
+        message(tr('Audio scaricato. La copia sullo StopWatch è ancora presente.'));
+      } catch (error) { message(error.message); } finally { downloading = false; download.disabled = false; }
+    };
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger'; remove.dataset.i18n = 'Elimina'; remove.textContent = tr('Elimina');
+    remove.onclick = async () => {
+      if (downloading || !confirm(tr('Eliminare {name} dal dispositivo? Scarica prima una copia.', {name: note.name}))) return;
+      try { await api('/api/notes',{method:'DELETE',body:JSON.stringify({name:note.name})}); await loadNotes(); }
+      catch (error) { message(error.message); }
+    };
+    row.append(label,download,remove); $('notes').append(row);
+  }
+}
+$('refresh').onclick = () => loadNotes().catch(error => message(error.message));
+function showStatus(status) {
+  currentStatus = status;
+  $('status').textContent = tr('Wi-Fi: {wifi} · Archivio: {storage}', {wifi: status.wifi ? tr('connesso') : tr('non connesso'), storage: status.storage_ready ? Math.round(status.used/1024)+' / '+Math.round(status.total/1024)+' KB' : tr('da inizializzare in Diagnostica → Archivio')});
+}
+async function start() {
+  try {
+    const config = await (await api('/api/config')).json();
+    currentConfig = config;
+    $('language').value = config.language || 'it';
+    applyLanguage($('language').value);
+    for (const zone of config.time_zones || ['Europe/Rome']) {
+      const option = document.createElement('option'); option.value = zone; option.textContent = zone;
+      $('time_zone').append(option);
+    }
+    $('time_zone').value = config.time_zone || 'Europe/Rome';
+    for (const key of ['brightness','volume','note_volume','vibration','screen_timeout','ssid','ha_url','ha_ca']) $(key).value = config[key];
+    $('wifi_password').placeholder = config.wifi_password_saved ? tr('Password salvata') : tr('Nessuna password salvata');
+    $('ha_token').placeholder = config.ha_token_saved ? tr('Token salvato') : tr('Inserisci il token');
+    for (const favorite of config.favorites) addFavorite(favorite);
+    $('fields').disabled = false;
+    await api('/api/time',{method:'PUT',body:JSON.stringify({epoch:Math.floor(Date.now()/1000)})});
+    const status = await (await api('/api/status')).json();
+    showStatus(status);
+    await loadNotes();
+  } catch (error) { message(error.message); }
+}
+start();
+</script></body></html>

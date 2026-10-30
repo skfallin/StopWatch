@@ -1,10 +1,10 @@
 blueprint:
   name: StopWatch — Spotify
   description: >-
-    Collega lo StopWatch all'account Spotify Premium configurato in Home Assistant.
-    Segue il lettore attivo su telefono, computer e Spotify Connect.
-    Comandi e aggiornamenti passano dal broker MQTT già configurato.
-    Crea una sola automazione per StopWatch. Non riproduce audio sul dispositivo.
+    Connect StopWatch to the Spotify Premium account configured in Home Assistant.
+    Follows the active player on your phone, computer or Spotify Connect device.
+    Commands and updates use the existing MQTT broker.
+    Create one automation per StopWatch. Audio does not play on StopWatch.
   domain: automation
   homeassistant:
     min_version: 2024.10.0
@@ -16,20 +16,23 @@ blueprint:
           filter:
             - integration: mqtt
               manufacturer: M5Stack
+              model: StopWatch C152
+            - integration: mqtt
+              manufacturer: M5Stack
               model: StopWatch C152 · firmware personale
     spotify:
-      name: Account Spotify
+      name: Spotify account
       selector:
         entity:
           filter:
             - integration: spotify
               domain: media_player
     ha_url:
-      name: Indirizzo di Home Assistant per la copertina
+      name: Home Assistant address for artwork
       description: >-
-        Esempio http://192.168.0.150:8123, senza barra finale.
-        Lascia vuoto per usare l'indirizzo Home Assistant già salvato sullo StopWatch.
-        Su HTTPS occorre un certificato valido.
+        Example http://192.168.1.20:8123, without a trailing slash.
+        Leave empty to use the Home Assistant address already saved on StopWatch.
+        HTTPS requires a valid certificate.
       default: ""
       selector:
         text: {}

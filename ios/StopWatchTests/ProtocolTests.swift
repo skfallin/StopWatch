@@ -2,6 +2,41 @@ import XCTest
 @testable import StopWatch
 
 final class ProtocolTests: XCTestCase {
+    func testHomeAndPresentationEditsPreserveOtherConfiguration() throws {
+        var current = DeviceConfiguration(), edited = DeviceConfiguration()
+        current.volume = 180; current.clockFace = "halo"
+        current.favorites = [Favorite(label: "Studio", entity: "light.studio")]
+        edited.homeApps = ["system", "spotify", "home"]
+        current.apply(edited, part: .launcher)
+        XCTAssertEqual(current.homeApps, edited.homeApps)
+        XCTAssertEqual(current.volume, 180); XCTAssertEqual(current.clockFace, "halo")
+        XCTAssertEqual(current.favorites.first?.entity, "light.studio")
+        edited.presentationPageKeys = true; current.apply(edited, part: .presentation)
+        let restored = try JSONDecoder().decode(DeviceConfiguration.self, from: JSONEncoder().encode(current))
+        XCTAssertTrue(restored.presentationPageKeys); XCTAssertEqual(restored.homeApps, edited.homeApps)
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(current)) as? [String: Any])
+        old.removeValue(forKey: "home_apps"); old.removeValue(forKey: "presentation_page_keys")
+        let legacy = try JSONDecoder().decode(DeviceConfiguration.self, from: JSONSerialization.data(withJSONObject: old))
+        XCTAssertEqual(legacy.homeApps, HomeApplication.allCases.map(\.rawValue)); XCTAssertFalse(legacy.presentationPageKeys)
+    }
+
+    func testMicroclickMigrationPreservesSilenceAndOtherSettings() throws {
+        var settings = DeviceConfiguration()
+        settings.ssid = "Casa"; settings.volume = 140; settings.noteVolume = 60
+        settings.clockFace = "halo"; settings.badge.keepAwake = true
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        for legacy in ["minimal", "soft", "glass", "arcade", "mechanical", "organic", "dreamy",
+                       "scifi", "rubber", "cinematic", "studio", "zen", "microclick", "off"] {
+            wire["sound_pack"] = legacy
+            var expected = settings
+            expected.soundPack = legacy == "off" ? "off" : "microclick"
+            let restored = try JSONDecoder().decode(DeviceConfiguration.self, from: JSONSerialization.data(withJSONObject: wire))
+            XCTAssertEqual(restored, expected)
+        }
+        wire.removeValue(forKey: "sound_pack")
+        XCTAssertEqual(try JSONDecoder().decode(DeviceConfiguration.self, from: JSONSerialization.data(withJSONObject: wire)), settings)
+    }
+
     func testClockConfigurationWireFormatAndLegacyDefaults() throws {
         for face in ["digital", "analog", "halo", "duo", "orbit", "segments"] {
             var configuration = DeviceConfiguration()

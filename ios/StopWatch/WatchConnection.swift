@@ -9,14 +9,14 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         case idle, scanning, connecting, authorizing, connected, reconnecting, bluetoothOff, unavailable
         var title: String {
             switch self {
-            case .idle: "Da collegare"
-            case .scanning: "Cerco StopWatch…"
-            case .connecting: "Connessione…"
-            case .authorizing: "Verifica abbinamento…"
-            case .connected: "Connesso"
-            case .reconnecting: "In attesa di StopWatch"
-            case .bluetoothOff: "Bluetooth spento"
-            case .unavailable: "Bluetooth non disponibile"
+            case .idle: String(localized: "Da collegare", bundle: AppLocalization.bundle)
+            case .scanning: String(localized: "Cerco StopWatch…", bundle: AppLocalization.bundle)
+            case .connecting: String(localized: "Connessione…", bundle: AppLocalization.bundle)
+            case .authorizing: String(localized: "Verifica abbinamento…", bundle: AppLocalization.bundle)
+            case .connected: String(localized: "Connesso", bundle: AppLocalization.bundle)
+            case .reconnecting: String(localized: "In attesa di StopWatch", bundle: AppLocalization.bundle)
+            case .bluetoothOff: String(localized: "Bluetooth spento", bundle: AppLocalization.bundle)
+            case .unavailable: String(localized: "Bluetooth non disponibile", bundle: AppLocalization.bundle)
             }
         }
     }
@@ -24,16 +24,25 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     private static let service = CBUUID(string: "75f3a100-9e9a-4b9c-9d73-c85f44e6a001")
     private static let rxID = CBUUID(string: "75f3a101-9e9a-4b9c-9d73-c85f44e6a001")
     private static let txID = CBUUID(string: "75f3a102-9e9a-4b9c-9d73-c85f44e6a001")
+    private static let mouseID = CBUUID(string: "75f3a103-9e9a-4b9c-9d73-c85f44e6a001")
     private static let rememberedKey = "pairedStopWatchIdentifier"
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var devices: [DiscoveredWatch] = []
     @Published private(set) var status: DeviceStatus?
     @Published private(set) var configuration: DeviceConfiguration?
+    @Published private(set) var usbState: USBControlStatus?
+    @Published private(set) var usbIssue: String?
+    private var usbInputs = USBInputBuffer()
+    private var usbSession: UInt32?
+    private var usbMonitoring = false
+    private var usbReliableInputInFlight = false
+    var usbFastPointer: Bool { mouseRx?.properties.contains(.writeWithoutResponse) == true }
     @Published private(set) var notes: [VoiceNote] = []
     @Published private(set) var working = false
     @Published private(set) var downloadProgress: Double?
     @Published private(set) var lastDownloadedURL: URL?
+    @Published private(set) var noteTitles: [String: String] = [:]
     @Published private(set) var transcripts: [String: String] = [:]
     @Published private(set) var transcriptionErrors: [String: String] = [:]
     @Published private(set) var syncingNote: String?
@@ -42,7 +51,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     @Published private(set) var receivingViaWiFi = false
     @Published private(set) var badgeProgress: Double?
     @Published private(set) var badgeTransferMethod = ""
-    @Published private(set) var badgeTransferDetail = "Preparazione…"
+    @Published private(set) var badgeTransferDetail = String(localized: "Preparazione…", bundle: AppLocalization.bundle)
     @Published private(set) var badgeTransferIssue: String?
     @Published private(set) var badgeTransferSeconds: TimeInterval?
     @Published private(set) var badgeState: BadgeStatus?
@@ -50,7 +59,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     @Published private(set) var relayURL = ""
     @Published private(set) var relayConfigured = false
     @Published private(set) var relayEnabled = false
-    @Published private(set) var relayMessage = "Da configurare" {
+    @Published private(set) var relayMessage = String(localized: "Da configurare", bundle: AppLocalization.bundle) {
         didSet { if oldValue != relayMessage { UserDefaults.standard.set(relayMessage, forKey: "relayStatus") } }
     }
     @Published private(set) var relayLastActivity: RelayActivity?
@@ -62,6 +71,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     private var found: [UUID: CBPeripheral] = [:]
     private var rx: CBCharacteristic?
     private var tx: CBCharacteristic?
+    private var mouseRx: CBCharacteristic?
     private var rememberedID: UUID?
     private var securityRead = false
     private var frames = FrameBuffer()
@@ -94,6 +104,15 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     init(preview: Bool = false) {
         self.preview = preview
         rememberedID = UserDefaults.standard.string(forKey: Self.rememberedKey).flatMap(UUID.init(uuidString:))
+        if !preview, rememberedID != nil {
+            // Before the bilingual beta, both choices were implicitly Italian.
+            if UserDefaults.standard.object(forKey: "transcriptionLanguage") == nil {
+                UserDefaults.standard.set("it-IT", forKey: "transcriptionLanguage")
+            }
+            if UserDefaults.standard.object(forKey: "usbKeyboardLayout") == nil {
+                UserDefaults.standard.set("it", forKey: "usbKeyboardLayout")
+            }
+        }
         super.init()
         restoreLocalNotes()
         if let data = UserDefaults.standard.data(forKey: "relayLastActivity") {
@@ -151,8 +170,8 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
             if let peripheral { central.cancelPeripheralConnection(peripheral) }
         }
         resetConnection()
-        configuration = nil; notes = []; remoteNotes = []; transcripts = [:]; transcriptionErrors = [:]; transferSeconds = [:]; transferMethods = [:]
-        relayConfigured = false; relayEnabled = false; relayURL = ""; relayMessage = "Da configurare"
+        configuration = nil; notes = []; remoteNotes = []; transcripts = [:]; noteTitles = [:]; transcriptionErrors = [:]; transferSeconds = [:]; transferMethods = [:]
+        relayConfigured = false; relayEnabled = false; relayURL = ""; relayMessage = String(localized: "Da configurare", bundle: AppLocalization.bundle)
         relayLastActivity = nil; UserDefaults.standard.removeObject(forKey: "relayLastActivity")
         phase = .idle
     }
@@ -168,7 +187,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         connectionTimeout = Task { [weak self] in
             try? await Task.sleep(for: .seconds(60))
             guard !Task.isCancelled, let self, !self.ready else { return }
-            self.error = "Connessione non completata. Sullo StopWatch apri iPhone Bluetooth e premi B per abbinare."
+            self.error = String(localized: "Connessione non completata. Sullo StopWatch apri iPhone Bluetooth e premi B per abbinare.", bundle: AppLocalization.bundle)
             self.central.cancelPeripheralConnection(device)
         }
     }
@@ -213,7 +232,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         guard self.peripheral?.identifier == peripheral.identifier else { return }
         resetConnection()
         phase = .idle
-        self.error = error?.localizedDescription ?? "Impossibile collegare StopWatch."
+        self.error = error?.localizedDescription ?? String(localized: "Impossibile collegare StopWatch.", bundle: AppLocalization.bundle)
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -231,9 +250,17 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         guard self.peripheral?.identifier == peripheral.identifier else { return }
         if let error { fail(error.localizedDescription); return }
         guard let service = peripheral.services?.first(where: { $0.uuid == Self.service }) else {
-            fail("Questo firmware non contiene il companion Bluetooth."); return
+            fail(String(localized: "Questo firmware non contiene il companion Bluetooth.", bundle: AppLocalization.bundle)); return
         }
-        peripheral.discoverCharacteristics([Self.rxID, Self.txID], for: service)
+        peripheral.discoverCharacteristics([Self.rxID, Self.txID, Self.mouseID], for: service)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
+        guard self.peripheral?.identifier == peripheral.identifier,
+              invalidatedServices.contains(where: { $0.uuid == Self.service }) else { return }
+        resetConnection()
+        phase = .authorizing
+        peripheral.discoverServices([Self.service])
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -241,7 +268,8 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         if let error { fail(error.localizedDescription); return }
         rx = service.characteristics?.first(where: { $0.uuid == Self.rxID })
         tx = service.characteristics?.first(where: { $0.uuid == Self.txID })
-        guard rx != nil, let tx else { fail("Protocollo Bluetooth non disponibile."); return }
+        mouseRx = service.characteristics?.first(where: { $0.uuid == Self.mouseID })
+        guard rx != nil, let tx else { fail(String(localized: "Protocollo Bluetooth non disponibile.", bundle: AppLocalization.bundle)); return }
         // Reading this encrypted characteristic invokes iOS's own passkey dialog.
         securityRead = true
         peripheral.readValue(for: tx)
@@ -249,13 +277,14 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         guard self.peripheral?.identifier == peripheral.identifier else { return }
-        if let error { fail("Abbinamento non riuscito: " + error.localizedDescription); return }
+        guard characteristic === tx else { return }
+        if let error { fail(String(localized: "Abbinamento non riuscito: ", bundle: AppLocalization.bundle) + error.localizedDescription); return }
         guard characteristic.uuid == Self.txID, characteristic.isNotifying else { return }
         handshake?.cancel()
         endHandshakeBackgroundTask()
         handshake = Task {
             let generation = relayGeneration
-            handshakeBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Riconnessione StopWatch") { [weak self] in
+            handshakeBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: String(localized: "Riconnessione StopWatch", bundle: AppLocalization.bundle)) { [weak self] in
                 if self?.relayGeneration == generation {
                     self?.handshake?.cancel()
                     self?.endHandshakeBackgroundTask()
@@ -265,11 +294,11 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
             defer { if handshakeBackgroundTask == background { endHandshakeBackgroundTask() } }
             do {
                 let value: DeviceStatus = try await request("status", body: EmptyMessage())
-                guard value.protocol == 1 else { throw CompanionError.message("Aggiorna il firmware dello StopWatch.") }
+                guard value.protocol == 1 else { throw CompanionError.message(String(localized: "Aggiorna il firmware dello StopWatch.", bundle: AppLocalization.bundle)) }
                 status = value
                 if rememberedID != peripheral.identifier {
                     pauseNoteSync()
-                    notes = []; remoteNotes = []; transcripts = [:]; transcriptionErrors = [:]; transferSeconds = [:]; transferMethods = [:]
+                    notes = []; remoteNotes = []; transcripts = [:]; noteTitles = [:]; transcriptionErrors = [:]; transferSeconds = [:]; transferMethods = [:]
                 }
                 rememberedID = peripheral.identifier
                 restoreLocalNotes()
@@ -287,6 +316,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard self.peripheral?.identifier == peripheral.identifier else { return }
+        guard characteristic === tx else { return }
         if let error { fail(error.localizedDescription); return }
         if securityRead {
             securityRead = false
@@ -311,14 +341,15 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
                     let request = pending
                     pending = nil; timeout?.cancel(); outgoing = []
                     if header.ok { request?.continuation.resume(returning: line) }
-                    else { request?.continuation.resume(throwing: CompanionError.message(header.error ?? "Operazione non riuscita.")) }
+                    else { request?.continuation.resume(throwing: CompanionError.message(header.error ?? String(localized: "Operazione non riuscita.", bundle: AppLocalization.bundle))) }
                 }
             }
-        } catch { fail("Risposta Bluetooth non valida. Riconnetti il dispositivo.") }
+        } catch { fail(String(localized: "Risposta Bluetooth non valida. Riconnetti il dispositivo.", bundle: AppLocalization.bundle)) }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         guard self.peripheral?.identifier == peripheral.identifier else { return }
+        guard characteristic === rx else { return }
         guard characteristic.uuid == Self.rxID, pending != nil else { return }
         if let error { fail(error.localizedDescription); return }
         writeIndex += 1
@@ -335,15 +366,15 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         // A user action may arrive while the periodic status read is finishing.
         while pending != nil || (!op.hasPrefix("relay.") && !relayTasks.isEmpty) { try await Task.sleep(for: .milliseconds(20)) }
         guard let peripheral, let rx, tx?.isNotifying == true, peripheral.state == .connected else {
-            throw CompanionError.message("Collegamento occupato o dispositivo non connesso.")
+            throw CompanionError.message(String(localized: "Collegamento occupato o dispositivo non connesso.", bundle: AppLocalization.bundle))
         }
         nextID &+= 1
         let id = nextID
         var bytes = try RequestMessage(id: id, op: op, data: body).encoded()
-        guard bytes.count <= FrameBuffer.maximumBytes else { throw CompanionError.message("Configurazione troppo grande.") }
+        guard bytes.count <= FrameBuffer.maximumBytes else { throw CompanionError.message(String(localized: "Configurazione troppo grande.", bundle: AppLocalization.bundle)) }
         bytes.append(10)
         let size = min(512, peripheral.maximumWriteValueLength(for: .withResponse))
-        guard size > 0, rx.properties.contains(.write) else { throw CompanionError.message("Scrittura Bluetooth non disponibile.") }
+        guard size > 0, rx.properties.contains(.write) else { throw CompanionError.message(String(localized: "Scrittura Bluetooth non disponibile.", bundle: AppLocalization.bundle)) }
         outgoing = stride(from: 0, to: bytes.count, by: size).map { Data(bytes[$0..<min($0 + size, bytes.count)]) }
         writeIndex = 0
         let response: Data = try await withCheckedThrowingContinuation { continuation in
@@ -351,7 +382,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
             timeout = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(12))
                 guard !Task.isCancelled, let self, self.pending?.id == id else { return }
-                self.fail("Nessuna conferma dal dispositivo. Riconnetti e verifica l'esito prima di ripetere il comando.")
+                self.fail(String(localized: "Nessuna conferma dal dispositivo. Riconnetti e verifica l'esito prima di ripetere il comando.", bundle: AppLocalization.bundle))
             }
             writeNext()
         }
@@ -366,6 +397,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     }
 
     private func resetConnection() {
+        usbInputs.clear(); usbState = nil; usbSession = nil
         relayGeneration = UUID()
         for task in relayTasks.values { task.cancel() }
         relayTasks.removeAll()
@@ -377,8 +409,8 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         timeout?.cancel()
         let continuation = pending?.continuation
         pending = nil
-        continuation?.resume(throwing: CompanionError.message("Connessione interrotta. Verifica l'esito prima di ripetere il comando."))
-        rx = nil; tx = nil; status = nil; badgeState = nil; securityRead = false
+        continuation?.resume(throwing: CompanionError.message(String(localized: "Connessione interrotta. Verifica l'esito prima di ripetere il comando.", bundle: AppLocalization.bundle)))
+        rx = nil; tx = nil; mouseRx = nil; status = nil; badgeState = nil; securityRead = false
         frames = FrameBuffer(); outgoing = []
     }
 
@@ -392,10 +424,78 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         catch { self.error = error.localizedDescription }
     }
 
+    func enqueueUSB(_ input: USBInput) {
+        guard usbMonitoring, ready, usbState?.ready == true else { return }
+        flushUSBMovement()
+        do { try usbInputs.append(input) }
+        catch { usbIssue = error.localizedDescription }
+    }
+
+    func moveUSB(x: Double, y: Double, wheel: Double = 0) {
+        guard usbMonitoring, ready, usbState?.ready == true else { return }
+        usbInputs.move(x: x, y: y, wheel: wheel)
+        flushUSBMovement()
+    }
+
+    private func flushUSBMovement() {
+        guard usbMonitoring, ready, !working, !usbReliableInputInFlight, usbState?.ready == true,
+              let session = usbState?.session, let peripheral, peripheral.state == .connected,
+              let mouseRx, mouseRx.properties.contains(.writeWithoutResponse) else { return }
+        while peripheral.canSendWriteWithoutResponse, usbInputs.items.first?.kind == "move" {
+            guard let input = usbInputs.pop(session: session), let bytes = input.motionPacket() else { return }
+            peripheral.writeValue(bytes, for: mouseRx, type: .withoutResponse)
+        }
+    }
+
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        guard self.peripheral?.identifier == peripheral.identifier else { return }
+        flushUSBMovement()
+    }
+
+    // Runs only while the control tab is visible; foreground input shares the existing encrypted channel.
+    func monitorUSB() async {
+        guard !usbMonitoring else { return }
+        usbMonitoring = true; usbIssue = nil
+        defer { usbMonitoring = false; usbReliableInputInFlight = false; usbInputs.clear(); usbSession = nil; usbState = nil }
+        var lastPoll = Date.distantPast
+        while !Task.isCancelled {
+            do {
+                flushUSBMovement()
+                guard ready, !working, pending == nil, relayTasks.isEmpty else {
+                    if !ready || working {
+                        if !usbInputs.items.isEmpty { usbIssue = String(localized: "Controllo sospeso durante un’altra operazione. Ripeti gli ultimi tasti.", bundle: AppLocalization.bundle) }
+                        usbInputs.clear()
+                    }
+                    try await Task.sleep(for: .milliseconds(40)); continue
+                }
+                if usbState == nil || Date().timeIntervalSince(lastPoll) >= 1 || (usbState?.queued ?? 0) > 32 {
+                    let value: USBControlStatus = try await request("usb.status", body: EmptyMessage())
+                    if usbSession != value.session || !value.ready { usbInputs.clear() }
+                    usbSession = value.session; usbState = value; lastPoll = Date()
+                }
+                if let state = usbState, state.ready, state.queued <= 32,
+                   usbInputs.items.first?.kind != "move" || !usbFastPointer,
+                   let input = usbInputs.pop(session: state.session) {
+                    usbReliableInputInFlight = true
+                    let value: USBControlStatus = try await request("usb.input", body: input)
+                    usbReliableInputInFlight = false
+                    if value.session != state.session || !value.ready { usbInputs.clear() }
+                    usbState = value; usbSession = value.session
+                }
+                try await Task.sleep(for: .milliseconds(25))
+            } catch is CancellationError { usbReliableInputInFlight = false; return }
+            catch {
+                usbReliableInputInFlight = false
+                usbInputs.clear(); usbIssue = error.localizedDescription; usbState = nil
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+        }
+    }
+
     func loadNotes() async throws {
         let list: NoteList = try await request("notes.list", body: EmptyMessage())
         guard list.notes.count <= 64, list.notes.allSatisfy(\.valid), Set(list.notes.map(\.name)).count == list.notes.count else {
-            throw CompanionError.message("Elenco note non valido.")
+            throw CompanionError.message(String(localized: "Elenco note non valido.", bundle: AppLocalization.bundle))
         }
         remoteNotes = list.notes
         restoreLocalNotes()
@@ -405,10 +505,18 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         do {
             let local = try archive?.notes() ?? []
             notes = (remoteNotes + local.filter { local in !remoteNotes.contains(where: { $0.name == local.name }) }).sorted { $0.name < $1.name }
+            noteTitles = Dictionary(uniqueKeysWithValues: notes.compactMap { note in archive?.title(for: note).map { (note.name, $0) } })
             transcripts = Dictionary(uniqueKeysWithValues: notes.compactMap { note in
                 archive?.transcript(for: note).map { (note.name, $0) }
             })
-        } catch { self.error = "Impossibile leggere le note salvate su iPhone: " + error.localizedDescription }
+        } catch { self.error = String(localized: "Impossibile leggere le note salvate su iPhone: ", bundle: AppLocalization.bundle) + error.localizedDescription }
+    }
+
+    func title(for note: VoiceNote) -> String { noteTitles[note.name] ?? note.title }
+    func rename(_ note: VoiceNote, title: String) throws {
+        guard let archive else { throw CompanionError.message(String(localized: "Collega o seleziona lo StopWatch per modificare le sue note.", bundle: AppLocalization.bundle)) }
+        try archive.saveTitle(title, for: note)
+        noteTitles[note.name] = archive.title(for: note)
     }
 
     func isOnDevice(_ note: VoiceNote) -> Bool { ready && remoteNotes.contains(where: { $0.name == note.name }) }
@@ -417,7 +525,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         guard synchronization == nil, !preview,
               ready || notes.contains(where: { localURL(for: $0) != nil && transcripts[$0.name] == nil && transcriptionErrors[$0.name] == nil }) else { return }
         synchronization = Task { [self] in
-            noteBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Ricezione nota StopWatch") { [weak self] in
+            noteBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: String(localized: "Ricezione nota StopWatch", bundle: AppLocalization.bundle)) { [weak self] in
                 self?.synchronization?.cancel()
                 self?.pauseNoteSync()
                 self?.endNoteBackgroundTask()
@@ -487,7 +595,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     func pauseNoteSync() { noteSync?.cancel() }
 
     func cancelNoteSync() {
-        if let syncingNote { transcriptionErrors[syncingNote] = "Elaborazione interrotta. Tocca Riprova per continuare." }
+        if let syncingNote { transcriptionErrors[syncingNote] = String(localized: "Elaborazione interrotta. Tocca Riprova per continuare.", bundle: AppLocalization.bundle) }
         pauseNoteSync()
     }
 
@@ -501,7 +609,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     }
 
     func save(_ value: DeviceConfiguration, part: SettingsPart) async throws {
-        guard ready, !working else { throw CompanionError.message("Attendi la connessione al dispositivo.") }
+        guard ready, !working else { throw CompanionError.message(String(localized: "Attendi la connessione al dispositivo.", bundle: AppLocalization.bundle)) }
         working = true
         defer { working = false }
         // HA can change favorites while an editor is open on the phone.
@@ -529,7 +637,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     }
 
     private func prepareRelay() async {
-        guard status?.relaySupported == true, let rememberedID else { relayMessage = "Aggiorna il firmware per usare il ponte"; return }
+        guard status?.relaySupported == true, let rememberedID else { relayMessage = String(localized: "Aggiorna il firmware per usare il ponte", bundle: AppLocalization.bundle); return }
         do {
             var account = try RelayKeychain.load(rememberedID)
             if account == nil, configuration?.haUrl.hasPrefix("https://") == true, configuration?.haTokenSaved == true {
@@ -540,14 +648,14 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
             relayConfigured = account != nil; relayURL = account?.url ?? configuration?.haUrl ?? ""
             relayEnabled = account?.enabled == true
             let _: RelayEnabled = try await request("relay.configure", body: RelayEnabled(enabled: relayEnabled))
-            relayMessage = relayEnabled ? "Abilitato · usa i dati dell’iPhone quando serve" : "Da configurare o disattivato"
+            relayMessage = relayEnabled ? String(localized: "Abilitato · usa i dati dell’iPhone quando serve", bundle: AppLocalization.bundle) : String(localized: "Da configurare o disattivato", bundle: AppLocalization.bundle)
             if relayEnabled { try await testRelay() }
         } catch { relayMessage = error.localizedDescription }
     }
 
     func saveRelay(url: String, token: String, enabled: Bool) async throws {
         guard let rememberedID, let deviceID = status?.mqttDeviceId, ready, status?.relaySupported == true else {
-            throw CompanionError.message("Collega lo StopWatch aggiornato prima di configurare il ponte.")
+            throw CompanionError.message(String(localized: "Collega lo StopWatch aggiornato prima di configurare il ponte.", bundle: AppLocalization.bundle))
         }
         let old = try RelayKeychain.load(rememberedID)
         let url = url.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -561,10 +669,10 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
 
     func testRelay() async throws {
         guard let rememberedID, let account = try RelayKeychain.load(rememberedID), let deviceID = status?.mqttDeviceId else {
-            throw CompanionError.message("Configura prima l’accesso remoto a Home Assistant.")
+            throw CompanionError.message(String(localized: "Configura prima l’accesso remoto a Home Assistant.", bundle: AppLocalization.bundle))
         }
         try await HomeRelay(account: account).check(deviceID: deviceID)
-        relayMessage = "Home Assistant raggiungibile · ponte pronto"
+        relayMessage = String(localized: "Home Assistant raggiungibile · ponte pronto", bundle: AppLocalization.bundle)
     }
 
     private func handleRelay(_ event: RelayEvent) {
@@ -572,7 +680,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         let generation = relayGeneration
         let started = Date()
         let background = UIApplication.shared.applicationState != .active
-        relayBackgroundTasks[event.kind] = UIApplication.shared.beginBackgroundTask(withName: "Ponte StopWatch \(event.kind.rawValue)") { [weak self] in
+        relayBackgroundTasks[event.kind] = UIApplication.shared.beginBackgroundTask(withName: String(localized: "Ponte StopWatch \(event.kind.rawValue)", bundle: AppLocalization.bundle)) { [weak self] in
             guard let self, self.relayGeneration == generation else { return }
             self.relayTasks[event.kind]?.cancel()
             if let identifier = self.relayBackgroundTasks.removeValue(forKey: event.kind), identifier != .invalid {
@@ -592,19 +700,19 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
             do {
                 let result: String
                 do {
-                    guard let account = try RelayKeychain.load(rememberedID), account.enabled else { throw CompanionError.message("Ponte iPhone disattivato.") }
+                    guard let account = try RelayKeychain.load(rememberedID), account.enabled else { throw CompanionError.message(String(localized: "Ponte iPhone disattivato.", bundle: AppLocalization.bundle)) }
                     _ = try event.validated()
                     result = try await HomeRelay(account: account).perform(event, deviceID: deviceID)
                     succeeded = true
                 } catch is CancellationError { return }
                 catch {
-                    relayMessage = "Ponte: " + error.localizedDescription
-                    result = try event.failure("Ponte iPhone non riuscito: verifica Home Assistant e la rete dati")
+                    relayMessage = String(localized: "Ponte: ", bundle: AppLocalization.bundle) + error.localizedDescription
+                    result = try event.failure(String(localized: "Ponte iPhone non riuscito: verifica Home Assistant e la rete dati", bundle: AppLocalization.bundle))
                 }
                 try Task.checkCancellation()
                 guard generation == relayGeneration, self.rememberedID == rememberedID else { return }
                 let _: EmptyMessage = try await request("relay.reply", body: RelayReply(kind: event.kind, payload: result))
-                if succeeded { relayMessage = background ? "Ultimo inoltro riuscito in background" : "Ultimo inoltro riuscito" }
+                if succeeded { relayMessage = background ? String(localized: "Ultimo inoltro riuscito in background", bundle: AppLocalization.bundle) : String(localized: "Ultimo inoltro riuscito", bundle: AppLocalization.bundle) }
             } catch { if !Task.isCancelled { relayMessage = error.localizedDescription;succeeded = false } }
             if generation == relayGeneration {
                 let activity = RelayActivity(date: Date(), kind: event.kind.rawValue, success: succeeded,
@@ -620,16 +728,16 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
 
     func uploadBadge(_ asset: BadgeAsset) async throws {
         guard ready, !working else {
-            throw CompanionError.message("Collega lo StopWatch con il firmware Badge aggiornato e termina eventuali registrazioni.")
+            throw CompanionError.message(String(localized: "Collega lo StopWatch con il firmware Badge aggiornato e termina eventuali registrazioni.", bundle: AppLocalization.bundle))
         }
-        working=true; badgeProgress=0; badgeTransferMethod=""; badgeTransferDetail="Preparazione…"; badgeTransferIssue=nil; badgeTransferSeconds=nil
+        working=true; badgeProgress=0; badgeTransferMethod=""; badgeTransferDetail=String(localized: "Preparazione…", bundle: AppLocalization.bundle); badgeTransferIssue=nil; badgeTransferSeconds=nil
         let started=ProcessInfo.processInfo.systemUptime
         defer { working=false; badgeProgress=nil; badgeWiFiAttempt=nil }
         // BLE may reconnect before Wi-Fi; cached status is not a transfer endpoint.
         var current: DeviceStatus=try await request("status",body: EmptyMessage())
         status=current; badgeState=current.badge
         guard !current.recording, current.badge != nil else {
-            throw CompanionError.message("Termina la registrazione e verifica il firmware Badge sullo StopWatch.")
+            throw CompanionError.message(String(localized: "Termina la registrazione e verifica il firmware Badge sullo StopWatch.", bundle: AppLocalization.bundle))
         }
         var transaction: BadgeUpload = try await request("badge.begin",body: BadgeBegin(bytes: asset.data.count,digest: asset.digest))
         do {
@@ -639,25 +747,25 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
                 for attempt in 0..<2 {
                     if attempt>0 {
                         current=try await request("status",body: EmptyMessage());status=current
-                        guard !current.recording else { throw CompanionError.message("Registrazione in corso: invio Badge interrotto.") }
-                        if !current.wifi { badgeTransferIssue="Lo StopWatch si è scollegato dal Wi-Fi.";break }
+                        guard !current.recording else { throw CompanionError.message(String(localized: "Registrazione in corso: invio Badge interrotto.", bundle: AppLocalization.bundle)) }
+                        if !current.wifi { badgeTransferIssue=String(localized: "Lo StopWatch si è scollegato dal Wi-Fi.", bundle: AppLocalization.bundle);break }
                         transaction=try await request("badge.begin",body: BadgeBegin(bytes:asset.data.count,digest:asset.digest))
                     }
                     attemptedWiFi=true; badgeTransferMethod="Wi-Fi"; badgeProgress=0
-                    badgeTransferDetail=attempt==0 ? "Invio via Wi-Fi…" : "Invio via Wi-Fi · tentativo 2 di 2…"
+                    badgeTransferDetail=attempt==0 ? String(localized: "Invio via Wi-Fi…", bundle: AppLocalization.bundle) : String(localized: "Invio via Wi-Fi · tentativo 2 di 2…", bundle: AppLocalization.bundle)
                     do {
                         let offer: NoteTransferOffer=try await request("badge.transfer",body: transaction)
-                        if !offer.available { badgeTransferIssue="Il servizio di trasferimento Wi-Fi non è disponibile sullo StopWatch.";break }
+                        if !offer.available { badgeTransferIssue=String(localized: "Il servizio di trasferimento Wi-Fi non è disponibile sullo StopWatch.", bundle: AppLocalization.bundle);break }
                         var request=try offer.request(expectedHost: current.ip,path: "badge")
                         request.httpMethod="POST"; request.setValue("application/octet-stream",forHTTPHeaderField: "Content-Type")
-                        guard let encoded=offer.certificate, let certificate=Data(base64Encoded: encoded) else { throw CompanionError.message("Certificato Wi-Fi non valido.") }
+                        guard let encoded=offer.certificate, let certificate=Data(base64Encoded: encoded) else { throw CompanionError.message(String(localized: "Certificato Wi-Fi non valido.", bundle: AppLocalization.bundle)) }
                         let attemptID=UUID();badgeWiFiAttempt=attemptID
                         let client=WiFiNoteDownload(host: current.ip,certificate: certificate) { [weak self] progress in
                             Task { @MainActor in
                                 guard let self, self.badgeWiFiAttempt==attemptID, self.badgeProgress != nil else { return }
                                 // URLSession may replay the body; keep progress within this attempt monotonic.
                                 self.badgeProgress=max(self.badgeProgress ?? 0,min(progress,1))
-                                if progress>=1 { self.badgeTransferDetail="Attendo conferma dallo StopWatch…" }
+                                if progress>=1 { self.badgeTransferDetail=String(localized: "Attendo conferma dallo StopWatch…", bundle: AppLocalization.bundle) }
                             }
                         }
                         try await client.upload(request,data: asset.data)
@@ -674,12 +782,12 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
                         break
                     }
                 }
-            } else { badgeTransferIssue="Lo StopWatch non è collegato al Wi-Fi." }
+            } else { badgeTransferIssue=String(localized: "Lo StopWatch non è collegato al Wi-Fi.", bundle: AppLocalization.bundle) }
             if !sent {
                 if attemptedWiFi { transaction=try await request("badge.begin",body:BadgeBegin(bytes:asset.data.count,digest:asset.digest)) }
                 badgeProgress=0
                 badgeTransferMethod="Bluetooth"
-                badgeTransferDetail="Invio via Bluetooth…"
+                badgeTransferDetail=String(localized: "Invio via Bluetooth…", bundle: AppLocalization.bundle)
                 for offset in stride(from: 0,to: asset.data.count,by: 4096) {
                     try Task.checkCancellation()
                     let end=min(offset+4096,asset.data.count)
@@ -687,9 +795,9 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
                     badgeProgress=Double(end)/Double(asset.data.count)
                 }
             }
-            badgeTransferDetail="Verifico e salvo il Badge…"
+            badgeTransferDetail=String(localized: "Verifico e salvo il Badge…", bundle: AppLocalization.bundle)
             let saved: BadgeStatus=try await request("badge.commit",body: transaction)
-            guard saved.available, saved.digest==asset.digest, saved.bytes==asset.data.count else { throw CompanionError.message("Il dispositivo non ha confermato questo Badge.") }
+            guard saved.available, saved.digest==asset.digest, saved.bytes==asset.data.count else { throw CompanionError.message(String(localized: "Il dispositivo non ha confermato questo Badge.", bundle: AppLocalization.bundle)) }
             badgeState=saved
             badgeTransferSeconds=ProcessInfo.processInfo.systemUptime-started
             if let url=localBadgeURL {
@@ -708,14 +816,14 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     }
 
     func download(_ note: VoiceNote) async throws -> URL {
-        guard ready, !working, note.valid, let archive else { throw CompanionError.message("Nota o collegamento non disponibile.") }
+        guard ready, !working, note.valid, let archive else { throw CompanionError.message(String(localized: "Nota o collegamento non disponibile.", bundle: AppLocalization.bundle)) }
         working = true
         let started = ProcessInfo.processInfo.systemUptime
         downloadProgress = 0
         defer { working = false; downloadProgress = nil; receivingViaWiFi = false }
         let current: DeviceStatus=try await request("status",body: EmptyMessage())
         status=current; badgeState=current.badge
-        guard !current.recording else { throw CompanionError.message("Termina la registrazione prima di ricevere la nota.") }
+        guard !current.recording else { throw CompanionError.message(String(localized: "Termina la registrazione prima di ricevere la nota.", bundle: AppLocalization.bundle)) }
         var audio = Data()
         audio.reserveCapacity(note.bytes)
         var method = "Bluetooth"
@@ -725,7 +833,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
                 if offer.available {
                     let request = try offer.request(expectedHost: current.ip)
                     guard let encoded = offer.certificate, let certificate = Data(base64Encoded: encoded) else {
-                        throw CompanionError.message("Certificato Wi-Fi non valido.")
+                        throw CompanionError.message(String(localized: "Certificato Wi-Fi non valido.", bundle: AppLocalization.bundle))
                     }
                     receivingViaWiFi = true
                     audio = try await WiFiNoteDownload(host: current.ip, certificate: certificate).download(request, expectedBytes: note.bytes)

@@ -15,15 +15,15 @@ final class NoteTranscriber {
         }
         try Task.checkCancellation()
         guard authorization == .authorized else {
-            throw CompanionError.message("Consenti Riconoscimento vocale in Impostazioni iPhone → StopWatch, poi tocca Riprova.")
+            throw CompanionError.message(String(localized: "Consenti Riconoscimento vocale in Impostazioni iPhone → StopWatch, poi tocca Riprova.", bundle: AppLocalization.bundle))
         }
-        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "it-IT")), recognizer.isAvailable else {
-            throw CompanionError.message("Riconoscimento italiano momentaneamente non disponibile. Riprova più tardi.")
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: UserDefaults.standard.string(forKey: "transcriptionLanguage") ?? "en-US")), recognizer.isAvailable else {
+            throw CompanionError.message(String(localized: "Riconoscimento nella lingua scelta momentaneamente non disponibile. Riprova più tardi.", bundle: AppLocalization.bundle))
         }
         guard recognizer.supportsOnDeviceRecognition else {
-            throw CompanionError.message("La trascrizione italiana sul dispositivo non è disponibile su questo iPhone.")
+            throw CompanionError.message(String(localized: "La trascrizione locale nella lingua scelta non è disponibile su questo iPhone.", bundle: AppLocalization.bundle))
         }
-        guard continuation == nil else { throw CompanionError.message("Una trascrizione è già in corso.") }
+        guard continuation == nil else { throw CompanionError.message(String(localized: "Una trascrizione è già in corso.", bundle: AppLocalization.bundle)) }
         let id = UUID()
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.requiresOnDeviceRecognition = true
@@ -46,7 +46,7 @@ final class NoteTranscriber {
                 timeout = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(120))
                     guard !Task.isCancelled else { return }
-                    self?.finish(.failure(CompanionError.message("La trascrizione sta impiegando troppo tempo. L'audio è salvo: tocca Riprova.")), id: id)
+                    self?.finish(.failure(CompanionError.message(String(localized: "La trascrizione sta impiegando troppo tempo. L'audio è salvo: tocca Riprova.", bundle: AppLocalization.bundle))), id: id)
                 }
             }
         } onCancel: {

@@ -1,6 +1,8 @@
+#include "i18n.h"
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <M5Unified.h>
+#include <utility/M5IOE1_Class.hpp>
 #include <WiFi.h>
 #include <atomic>
 #include <esp_heap_caps.h>
@@ -9,6 +11,7 @@
 #include "companion.h"
 #include "home_assistant.h"
 #include "home_state.h"
+#include "light_control.h"
 #include "firmware.h"
 #include "mqtt_bridge.h"
 #include "portal.h"
@@ -17,29 +20,41 @@
 #include "ui_drawing.h"
 #include "badge.h"
 #include "clock_view.h"
+#include "productivity_view.h"
 #include "music_view.h"
 #include "music_artwork.h"
 #include "quick_settings_view.h"
+#include "scene_view.h"
+#include "security_key.h"
 
 namespace {
 constexpr uint32_t muted = 0x9aaebd;
 constexpr uint32_t accent = 0xa5ecc2, blue = 0x8cc8ff, yellow = 0xffd377, red = 0xff8993;
-constexpr const char* timezoneRome = "CET-1CEST,M3.5.0,M10.5.0/3";
+void applyRegion(const Settings& value) {
+    i18n::italian = value.language == "it";
+    setenv("TZ", regional::rule(value.timeZone.c_str()), 1);
+    tzset();
+}
 using Screen = ui::Screen;
 const char* diagnostics[] = {"Pulsanti A e B", "Touch", "Display AMOLED", "Vibrazione", "Altoparlante",
     "Microfono", "Movimento / IMU", "Orologio RTC", "Batteria / USB", "Wi-Fi", "Bluetooth LE", "Archivio / RAM", "Porta Grove / GPIO", "LED verde"};
-const char* settingNames[] = {"Luminosita", "Interazioni", "Vibrazione", "Display spento dopo", "Pacchetto suoni", "Colori", "Volume note"};
+const char* settingNames[] = {"Luminosità", "Interazioni", "Vibrazione", "Spegni display", "Pacchetto suoni", "Colori", "Volume note"};
+const char* settingsSections[]={"Display","Audio","Standby"};
 Settings settings;
 VoiceNotes notes;
 Badge badgeApp;
 clockwork::Timer clockTimer;
 clockwork::Stopwatch chronometer;
+clockwork::Focus focusSession;
+clockwork::Stopwatch presentationTime;
 size_t clockItem=0;
 size_t musicSource=0;
 size_t musicMenu=0,playlistItem=0;
 bool playlistRequested=false;
 uint32_t lastMusicRead=0;
 MusicArtwork musicArtwork;
+UsbControl usbControl;
+bool usbPaused=false;
 uint32_t clockControlsUntil=0;
 time_t clockDrawnSecond=-1;
 HomeAssistant home;
@@ -47,15 +62,18 @@ Controls controls;
 ui::TouchInput touchInput;
 M5Canvas canvas(&M5.Display);
 Screen screen = Screen::Home;
-size_t selected = 0, systemItem = 0, diagnostic = 0, setting = 0, favorite = 0;
+ui::HomeMenu homeMenu;
+size_t systemItem = 0, diagnostic = 0, setting = 0, favorite = 0;
 int settingPreview = -1;
 bool touchRecording = false, noticeTouch = false, noticeDisplayed = false;
 bool displayDimmed=false;
 bool quickPanelOpen=false, quietSavePending=false, quietSaveFailed=false;
+int quickPage=0,quickPreview=-1;
 uint32_t badgeControlsUntil=0;
 uint32_t transitionAt = 0, lastWave = 0;
 uint32_t surfaceColor = ui::black, foregroundColor = ui::white;
 std::array<uint16_t, 24> waveform{};
+bool homeFramePending=false;
 bool dirty = true, screenOff = false, memoryOk = false, settingsOk = true, homeReady = false;
 bool ledOn = false, showPageQr = false, forgetOption = false;
 bool homeAfterNote = false;
@@ -63,16 +81,27 @@ uint32_t lastInteraction = 0, lastDraw = 0, lastTick = 0, vibrationUntil = 0;
 uint32_t lastBatteryRead=0,lastCpuWork=0;
 bool cpuScaling=true;
 uint32_t noticeAt = 0, reconnectAt = 0, lastHaRead = 0, lastRtcSync = 0;
+uint32_t noticeDuration=4500,lastChargeRead=0;
+bool charging=false,chargeNotified=false,chargeNoticePending=false;
+int chargeCandidate=-1;
+ui::Icon noticeIcon=ui::Icon::Activity;
 uint32_t pressesA = 0, pressesB = 0;
 uint8_t displayColor = 0;
 int batteryLevel = -1, batteryMv = -1;
 int touchX = -1, touchY = -1;
-String notice, groveResult;
+String notice, noticeDetail, groveResult;
 String activeSsid, activeWifiPassword;
 m5::imu_data_t imu{};
 std::array<String, policy::maxFavorites> states{}, units{};
 std::array<uint32_t, policy::maxFavorites> stateUpdated{};
 casa::ToggleVerification homeCommand;
+casa::LightLevel lightDraft;
+std::array<bool,policy::maxFavorites> lightCapable{};
+std::array<int,policy::maxFavorites> lightLevels{};
+String lightEntity;
+size_t lightFavorite=0;
+bool adjustOption=false;
+int casaHoldProgress=0;
 uint32_t stateResetAt=0;
 
 bool canSave() { return !home.busy() && !notes.busy(); }
@@ -83,7 +112,7 @@ bool remoteOutput(const String& action);
 void extraStatus(JsonObject out);
 void deviceStatus(JsonObject out);
 Portal portal(settings, notes, canSave, onSettingsSaved);
-Companion companion(settings, notes, badgeApp, canSave, onSettingsSaved, remoteOutput, extraStatus);
+Companion companion(settings, notes, badgeApp, usbControl, canSave, onSettingsSaved, remoteOutput, extraStatus);
 MqttBridge mqtt(settings, canSave, onSettingsSaved, remoteOutput, deviceStatus);
 
 void updateCpu(uint32_t now,bool working,bool drawing=false) {
@@ -102,11 +131,11 @@ bool cpuWorkPending() {
     const bool idleBadge=screen==Screen::Badge && badgeApp.available() &&
         (!badgeApp.animated() || !settings.badgeAnimate) &&
         (!settings.badgeAutoRotate || uint32_t(millis()-badgeApp.lastMotion())>=2000);
-    const bool passiveDisplay=!quickPanelOpen && (screen==Screen::Clock || idleBadge);
+    const bool passiveDisplay=!quickPanelOpen && (screen==Screen::Clock || screen==Screen::Focus || screen==Screen::Slides || idleBadge);
     return (!screenOff && !passiveDisplay) || M5.BtnA.isPressed() || M5.BtnB.isPressed() || M5.Touch.getCount()>0 ||
         notes.busy() || notes.playing() || M5.Speaker.isPlaying() ||
         home.busy() || homeCommand.pending() || portal.active() || badgeApp.uploading() ||
-        companion.hasWork() || mqtt.hasWork() || musicArtwork.busy();
+        companion.hasWork() || mqtt.hasWork() || musicArtwork.busy() || usbControl.busy() || security_key::busy();
 }
 
 void sound(sfx::Cue cue, bool preview=false) {
@@ -115,8 +144,38 @@ void sound(sfx::Cue cue, bool preview=false) {
 
 void toast(const String& text) {
     notice = text;
+    noticeDetail="";noticeIcon=ui::Icon::Activity;noticeDuration=4500;
     noticeAt = millis();
     dirty = true;
+}
+
+void updateCharging(uint32_t now) {
+    if(chargeCandidate>=0 && uint32_t(now-lastChargeRead)<1000) return;
+    lastChargeRead=now;
+    const int vbus=M5.Power.getVBUSVoltage();
+    const auto state=M5.Power.isCharging();
+    if(vbus<0 || state==m5::Power_Class::charge_unknown) return;
+    const bool usb=vbus>=4000;
+    const int candidate=(usb?1:0)+(usb && state==m5::Power_Class::is_charging?2:0);
+    if(candidate!=chargeCandidate) { chargeCandidate=candidate;return; }
+    const bool next=(candidate&2)!=0;
+    if(charging!=next) { charging=next;dirty=true; }
+    if(!usb) {
+        chargeNotified=false;chargeNoticePending=false;
+        if(noticeIcon==ui::Icon::Charging) { notice="";dirty=true; }
+    }
+    if(charging && !chargeNotified) { chargeNotified=true;chargeNoticePending=true; }
+    if(!charging) chargeNoticePending=false;
+    if(!chargeNoticePending || notes.busy() || quickPanelOpen || security_key::awaiting() ||
+        screen==Screen::Companion || screen==Screen::NoteSaved ||
+        (!notice.isEmpty() && uint32_t(now-noticeAt)<noticeDuration)) return;
+    chargeNoticePending=false;
+    toast(i18n::text("In carica"));
+    noticeIcon=ui::Icon::Charging;
+    noticeDetail=(batteryLevel<0?String(i18n::text("USB collegata")):String(batteryLevel)+i18n::text("% · USB collegata"));
+    noticeDuration=3200;
+    screenOff=false;displayDimmed=false;lastInteraction=now;
+    M5.Display.setBrightness(settings.brightness);
 }
 
 void vibrate(uint32_t duration = 35, bool test = false) {
@@ -141,6 +200,9 @@ void applySettings() {
 
 void showQuickPanel(bool open) {
     quickPanelOpen=open;
+    if(quickPreview>=0) M5.Display.setBrightness(settings.brightness);
+    quickPreview=-1;
+    if(open) quickPage=0;
     noticeTouch=false;
     if(settingPreview>=0) { settingPreview=-1; applySettings(); }
     if(displayDimmed) { displayDimmed=false; M5.Display.setBrightness(settings.brightness); }
@@ -159,16 +221,18 @@ void toggleQuiet() {
 void playNote() {
     sfx::stop();
     if(notes.playing()) M5.Speaker.stop();
-    else if(settings.doNotDisturb) toast("Non disturbare attivo");
-    else if(!notes.playLatest(settings.noteVolume)) toast("Nessuna nota riproducibile");
+    else if(settings.doNotDisturb) toast(i18n::text("Non disturbare attivo"));
+    else if(!notes.playLatest(settings.noteVolume)) toast(i18n::text("Nessuna nota riproducibile"));
 }
 
 void onSettingsSaved() {
+    applyRegion(settings);
     quietSavePending=quietSaveFailed=false;
     settingPreview=-1;
     touchInput.suppressUntilReleased();
-    if(screen==Screen::ActionConfirm) changeScreen(Screen::HomeAssistant);
+    if(screen==Screen::ActionConfirm || screen==Screen::Light || screen==Screen::LightConfirm) changeScreen(Screen::HomeAssistant);
     applySettings();
+    homeMenu.configure(settings.homeApps,settings.homeAppCount);
     if(clockTimer.state()==clockwork::Timer::State::Idle) clockTimer.setSeconds(settings.timerSeconds);
     states.fill(""); units.fill(""); stateUpdated.fill(0);
     homeCommand.clear(); stateResetAt=millis();
@@ -176,7 +240,7 @@ void onSettingsSaved() {
     if (activeSsid != settings.ssid || activeWifiPassword != settings.wifiPassword) reconnectAt = millis() + 600;
     mqtt.configure();
     mqtt.changed();
-    toast("Configurazione salvata");
+    toast(i18n::text("Configurazione salvata"));
 }
 
 void connectWifi() {
@@ -215,13 +279,16 @@ void extraStatus(JsonObject out) {
 void deviceStatus(JsonObject out) { companion.status(out); }
 
 void changeScreen(Screen next) {
+    if(screen==Screen::Slides && next!=Screen::Slides && presentationTime.running()) presentationTime.toggle(millis());
+    if(next==Screen::Slides && screen!=next) { presentationTime.reset();presentationTime.toggle(millis()); }
     if(screen==Screen::Badge && next!=Screen::Badge) badgeApp.suspend();
+    if(next==Screen::UsbControl && screen!=next) usbPaused=false;
     if(displayDimmed && screen!=next) { displayDimmed=false; if(!screenOff) M5.Display.setBrightness(settings.brightness); }
     if(next==Screen::Badge) { badgeControlsUntil=0; notice=""; }
     if(next==Screen::Clock) { clockControlsUntil=millis()+4000;notice=""; }
     if(next==Screen::Spotify || next==Screen::MusicSources || next==Screen::MusicMenu || next==Screen::MusicPlaylists) { lastMusicRead=millis()-5000;notice=""; }
     if(next==Screen::MusicPlaylists) { playlistRequested=false;playlistItem=0; }
-    if(next==Screen::ActionConfirm) notice="";
+    if(next==Screen::ActionConfirm || next==Screen::Light || next==Screen::LightConfirm) { notice="";adjustOption=false; }
     if(settingPreview>=0) { settingPreview=-1; applySettings(); }
     touchInput.suppressUntilReleased();
     transitionAt=millis();
@@ -232,7 +299,9 @@ void changeScreen(Screen next) {
         M5.Power.setLed(0); ledOn = false;
     }
     screen = next;
-    if (next == Screen::Companion && !portal.start()) toast("Avvio Wi-Fi companion fallito");
+    security_key::update(screen==Screen::SecurityKey && !quickPanelOpen && !notes.busy(),M5.BtnA.isPressed(),M5.BtnB.isPressed());
+    usbControl.update(((screen==Screen::UsbControl && !usbPaused) || screen==Screen::Slides) && !quickPanelOpen && !notes.busy(),companion.connected(),millis(),screen==Screen::Slides);
+    if (next == Screen::Companion && !portal.start()) toast(i18n::text("Avvio Wi-Fi companion fallito"));
     dirty = true;
 }
 
@@ -272,43 +341,32 @@ int settingValue() {
     return settingPreview>=0 ? settingPreview : values[setting];
 }
 
-void drawHome() {
-    if(settings.doNotDisturb) ui::icon(canvas,ui::Icon::Moon,233,24,16,ui::accent);
+void drawStatus() {
+    if(settings.doNotDisturb) ui::icon(canvas,ui::Icon::Moon,233,14,14,ui::accent);
     tm local{};
     const time_t now=time(nullptr);
     localtime_r(&now,&local);
-    char clock[8]="--:--",date[18]="STOPWATCH";
-    if(now>=1704067200) {
-        strftime(clock,sizeof(clock),"%H:%M",&local);
-        const char* days[]={"DOM","LUN","MAR","MER","GIO","VEN","SAB"};
-        snprintf(date,sizeof(date),"%s %d",days[local.tm_wday],local.tm_mday);
-    }
+    char date[8]="--:--";
+    if(now>=1704067200) strftime(date,sizeof(date),"%H:%M",&local);
     const String battery=batteryLevel<0?"--":String(batteryLevel)+"%";
     const auto status=ui::statusLayout(ui::textWidth(canvas,date,ui::Font::Small),ui::textWidth(canvas,battery,ui::Font::Small));
-    ui::label(canvas,date,status.dateX,51,ui::Font::Small,ui::muted);
-    ui::icon(canvas,WiFi.status()!=WL_CONNECTED && companion.relayReady()?ui::Icon::Bluetooth:ui::Icon::Wifi,
-        status.wifiX,51,18,WiFi.status()==WL_CONNECTED || companion.relayReady()?ui::navigation:ui::muted);
-    ui::label(canvas,battery,status.batteryX,51,ui::Font::Small,ui::muted,ui::black,58);
-    canvas.drawRoundRect(status.batteryIconX,44,24,14,3,ui::muted);
-    canvas.fillRect(status.batteryIconX+24,49,2,4,ui::muted);
-    if(batteryLevel>0) canvas.fillRoundRect(status.batteryIconX+3,47,std::max(1,18*std::min(batteryLevel,100)/100),8,1,ui::muted);
-    ui::label(canvas,clock,233,100,ui::Font::Clock,ui::white,ui::black,310);
-    const ui::Icon icons[]={ui::Icon::House,ui::Icon::Mic,ui::Icon::Badge,ui::Icon::Clock,ui::Icon::Music,ui::Icon::Sliders};
-    const char* names[]={"Casa","Note","Badge","Orologio","Spotify","Sistema"};
-    const float age=std::min(1.0f,uint32_t(millis()-transitionAt)/160.0f);
-    const int inset=int(3*(1-age)*(1-age));
-    const ui::Circle primary=ui::homeMain;
-    canvas.fillSmoothCircle(primary.x,primary.y,primary.radius-inset,ui::accent);
-    ui::icon(canvas,icons[selected],primary.x,primary.y-22,56,ui::ink,ui::accent);
-    ui::label(canvas,names[selected],primary.x,primary.y+41,ui::Font::Label,ui::ink,ui::accent,164);
-    const ui::Circle sides[]={ui::homeLeft,ui::homeRight};
-    for(int i=0;i<2;++i) {
-        const size_t index=(selected+(i==0?1:ui::homeCount-1))%ui::homeCount;
-        canvas.fillSmoothCircle(sides[i].x,sides[i].y,sides[i].radius,ui::surface);
-        ui::icon(canvas,icons[index],sides[i].x,sides[i].y-13,30,ui::navigation,ui::surface);
-        ui::label(canvas,names[index],sides[i].x,sides[i].y+26,ui::Font::Small,ui::white,ui::surface,90);
+    ui::label(canvas,date,status.dateX,36,ui::Font::Small,ui::muted);
+    ui::connectionIcon(canvas,status.wifiX,36,WiFi.status()==WL_CONNECTED,companion.relayReady());
+    ui::label(canvas,battery,status.batteryX,36,ui::Font::Small,charging?ui::accent:ui::muted,ui::black,58);
+    if(charging) ui::icon(canvas,ui::Icon::Charging,status.batteryIconX+12,36,27,ui::accent);
+    else {
+        canvas.drawRoundRect(status.batteryIconX,29,24,14,3,ui::muted);
+        canvas.fillRect(status.batteryIconX+24,34,2,4,ui::muted);
+        if(batteryLevel>0) canvas.fillRoundRect(status.batteryIconX+3,32,std::max(1,18*std::min(batteryLevel,100)/100),8,1,ui::muted);
     }
-    ui::dots(canvas,selected,ui::homeCount);
+}
+
+void drawHome() {
+    const uint32_t age=uint32_t(millis()-transitionAt);
+    scene_ui::home(canvas,homeMenu,age);
+    // Rendering itself can cross the deadline; present one frame at the final geometry.
+    homeFramePending=age<180;
+    drawStatus();
 }
 
 bool badgeControls() { return !badgeApp.available() || !badgeApp.error().isEmpty() || (badgeControlsUntil && int32_t(badgeControlsUntil-millis())>0); }
@@ -316,7 +374,9 @@ bool clockControls() { return time(nullptr)<1704067200 || (clockControlsUntil &&
 int touchSelection() {
     if(screen==Screen::MusicSources) return int(musicSource);
     if(screen==Screen::MusicPlaylists) return mqtt.playlists().items.empty()?-1:int(playlistItem);
-    return screen==Screen::Timer?int(clockTimer.state()!=clockwork::Timer::State::Idle):int(selected);
+    if(screen==Screen::System) return int(systemItem);
+    if(screen==Screen::SettingsMenu || screen==Screen::SettingsSection) return int(setting);
+    return screen==Screen::Timer?int(clockTimer.state()!=clockwork::Timer::State::Idle):0;
 }
 void clockPage(int index) {
     const Screen pages[]={Screen::Clock,Screen::Timer,Screen::Stopwatch};
@@ -324,7 +384,7 @@ void clockPage(int index) {
 }
 void nextClockFace() {
     Settings next=settings;next.clockFace=(next.clockFace+1)%clockwork::faceIds.size();
-    if(next.save()) settings=next;else toast("Quadrante non salvato");
+    if(next.save()) settings=next;else toast(i18n::text("Quadrante non salvato"));
     clockControlsUntil=millis()+4000;dirty=true;sound(sfx::Cue::Select);
 }
 void timerSecondaryAction() {
@@ -350,52 +410,78 @@ void drawBadge() {
     if(!badgeApp.draw(canvas,settings.badgeAutoRotate)) {
         header("Badge");
         ui::icon(canvas,ui::Icon::Badge,233,200,78,ui::accent);
-        text("Il tuo Badge.",281,ui::white,2);
-        text(badgeApp.error().isEmpty()?"Carica foto o GIF dall'iPhone":badgeApp.error(),331,ui::muted,1,310);
+        text(i18n::text("Il tuo Badge."),281,ui::white,2);
+        text(badgeApp.error().isEmpty()?i18n::text("Carica foto o GIF dall'iPhone"):badgeApp.error(),331,ui::muted,1,310);
         return;
     }
     if(badgeControls()) {
         canvas.fillSmoothRoundRect(155,51,177,56,28,ui::surface);
         header("Badge");
-        ui::pill(canvas,233,323,240,settings.badgeAutoRotate?"Rotazione: auto":"Fissa · B ruota 45°");
-        ui::pill(canvas,233,389,240,badgeApp.animated()?(settings.badgeAnimate?"Pausa GIF":"Riprendi GIF"):"Torna alla home");
+        ui::pill(canvas,233,323,240,settings.badgeAutoRotate?i18n::text("Rotazione: auto"):i18n::text("Fissa · B ruota 45°"));
+        ui::pill(canvas,233,389,240,badgeApp.animated()?(settings.badgeAnimate?i18n::text("Pausa GIF"):i18n::text("Riprendi GIF")):i18n::text("Torna alla home"));
     }
 }
 
 void drawSystem() {
-    header("Sistema");
+    drawStatus();
+    header(i18n::text("Sistema"));
     const char* titles[]={"Impostazioni","Diagnostica","iPhone","Browser Wi-Fi"};
+    const char* details[]={"Display, audio, standby","Verifica hardware","Abbinamento e ponte","Configurazione web"};
     const ui::Icon icons[]={ui::Icon::Sliders,ui::Icon::Activity,ui::Icon::Bluetooth,ui::Icon::Link};
-    for(int i=0;i<4;++i) {
-        const int y=152+i*71;
-        const uint32_t fill=i==systemItem?ui::selectionSurface:ui::surface;
-        canvas.fillSmoothRoundRect(85,y-31,296,62,24,fill);
-        if(i==systemItem) canvas.fillSmoothCircle(96,y,3,ui::accent);
-        ui::icon(canvas,icons[i],119,y,25,ui::accent,fill);
-        ui::label(canvas,titles[i],238,y,ui::Font::Body,ui::white,fill,200);
-        ui::icon(canvas,ui::Icon::Next,355,y,17,ui::muted,fill);
+    const int page=systemItem/2;
+    for(int slot=0;slot<2;++slot) {
+        const int item=page*2+slot;
+        scene_ui::row(canvas,ui::menuRow(slot),i18n::text(titles[item]),icons[item],i18n::text(details[item]),item==int(systemItem));
     }
+    scene_ui::pages(canvas,page);
+}
+
+String settingSummary(int item) {
+    const int values[]={settings.brightness,settings.volume,settings.vibration,settings.screenTimeout,settings.soundPack,settings.colorTheme,settings.noteVolume};
+    if(item==4) return i18n::text(sfx::packNames[values[item]]);
+    if(item==5) return i18n::text(ui::themes[values[item]].name);
+    if(item==3) return String(values[item])+" s";
+    return String(values[item]*100/((item==1 || item==6)?200:255))+"%";
+}
+
+void drawSettingsMenu() {
+    drawStatus();header(i18n::text("Impostazioni"));
+    const ui::Icon icons[]={ui::Icon::Sun,ui::Icon::Speaker,ui::Icon::Timer};
+    for(int section=0;section<3;++section)
+        scene_ui::row(canvas,ui::settingsRow(section),i18n::text(settingsSections[section]),icons[section],"",section==ui::settingsSection(setting));
+}
+
+void drawSettingsSection() {
+    const int section=ui::settingsSection(setting),page=ui::settingsPosition(setting)/2;
+    drawStatus();header(i18n::text(settingsSections[section]));
+    const ui::Icon icons[]={ui::Icon::Sun,ui::Icon::Speaker,ui::Icon::Activity,ui::Icon::Clock,ui::Icon::Speaker,ui::Icon::Sliders,ui::Icon::Mic};
+    for(int slot=0;slot<2 && page*2+slot<ui::settingsCount(section);++slot) {
+        const int item=ui::settingsItems[section][page*2+slot];
+        scene_ui::row(canvas,ui::menuRow(slot),i18n::text(settingNames[item]),icons[item],settingSummary(item),item==int(setting));
+    }
+    if(ui::settingsCount(section)>2) scene_ui::pages(canvas,page);
 }
 
 void drawSettings() {
-    header("Impostazioni");
+    drawStatus();header(i18n::text(settingsSections[ui::settingsSection(setting)]));
     const ui::Icon icons[]={ui::Icon::Sun,ui::Icon::Speaker,ui::Icon::Activity,ui::Icon::Clock,ui::Icon::Speaker,ui::Icon::Sliders,ui::Icon::Mic};
     const int value=settingValue();
-    ui::label(canvas,settingNames[setting],233,140,ui::Font::Label,ui::white);
+    ui::label(canvas,i18n::text(settingNames[setting]),233,140,ui::Font::Label,ui::white);
     ui::icon(canvas,icons[setting],233,187,40,ui::accent);
-    if (setting==4 || setting==5) ui::label(canvas,setting==4?sfx::packNames[value]:ui::themes[value].name,233,264,ui::Font::Title,ui::white);
+    if (setting==4 || setting==5) ui::label(canvas,setting==4?i18n::text(sfx::packNames[value]):i18n::text(ui::themes[value].name),233,264,ui::Font::Title,ui::white);
     else {
         const int displayValue=setting==3?value:value*100/((setting==1 || setting==6)?200:255);
         ui::label(canvas,String(displayValue)+(setting==3?" s":"%"),233,264,ui::Font::Clock,ui::white);
     }
-    arrows();
-    const int minimum=setting==0?32:setting==3?15:0,maximum=(setting==1 || setting==6)?200:setting==3?180:setting==4?12:setting==5?5:255;
+    ui::circleButton(canvas,ui::settingsPrevious,ui::Icon::Back,36,ui::surface,ui::navigation);
+    ui::circleButton(canvas,ui::settingsNext,ui::Icon::Next,36,ui::surface,ui::navigation);
+    const int minimum=setting==0?32:setting==3?15:0,maximum=(setting==1 || setting==6)?200:setting==3?180:setting==4?int(sfx::packIds.size())-1:setting==5?5:255;
     const int position=109+(std::clamp(value,minimum,maximum)-minimum)*248/(maximum-minimum);
     canvas.fillSmoothRoundRect(109,339,248,8,4,ui::line);
     canvas.fillSmoothRoundRect(109,339,std::max(8,position-109),8,4,ui::accent);
     canvas.fillSmoothCircle(position,343,15,ui::accent);
-    if (setting==4) ui::label(canvas,"Trascina o premi B · ascolta",233,386,ui::Font::Small,ui::muted);
-    else if(setting==5) ui::label(canvas,"Trascina o premi B · anteprima",233,386,ui::Font::Small,ui::muted);
+    if (setting==4) ui::label(canvas,i18n::text("Trascina o premi B · ascolta"),233,386,ui::Font::Small,ui::muted);
+    else if(setting==5) ui::label(canvas,i18n::text("Trascina o premi B · anteprima"),233,386,ui::Font::Small,ui::muted);
     else {
         ui::label(canvas,setting==3?"15 s":"Min",114,386,ui::Font::Small,ui::muted,ui::black,65);
         ui::label(canvas,setting==3?"180 s":"Max",350,386,ui::Font::Small,ui::muted,ui::black,65);
@@ -403,15 +489,44 @@ void drawSettings() {
     ui::dots(canvas,setting,7);
 }
 
+bool favoriteCanDim() {
+    return favoriteFresh() && lightCapable[favorite] && settings.favorites[favorite].entity.startsWith("light.");
+}
+
+void openLight() {
+    if(!favoriteCanDim()) { toast(i18n::text("Intensità non disponibile: aggiorna lo stato"));return; }
+    lightEntity=settings.favorites[favorite].entity;lightFavorite=favorite;
+    lightDraft.begin(lightLevels[favorite]);
+    changeScreen(Screen::Light);sound(sfx::Cue::Open);
+}
+
+void drawLight() {
+    header(i18n::text("Luce"));
+    ui::label(canvas,lightEntity==settings.favorites[lightFavorite].entity?settings.favorites[lightFavorite].label:i18n::text("Luce modificata"),233,121,ui::Font::Body,ui::white);
+    ui::icon(canvas,ui::Icon::Sun,233,194,50,ui::accent);
+    ui::label(canvas,String(lightDraft.value)+"%",233,267,ui::Font::Clock,ui::white);
+    ui::label(canvas,i18n::text("Luminosità"),233,306,ui::Font::Small,ui::muted);
+    const int position=109+lightDraft.value*248/100;
+    canvas.fillSmoothRoundRect(109,339,248,8,4,ui::line);
+    canvas.fillSmoothRoundRect(109,339,std::max(8,position-109),8,4,ui::accent);
+    canvas.fillSmoothCircle(position,343,15,ui::accent);
+    ui::pill(canvas,233,412,220,i18n::text("Applica"),ui::accent,ui::ink);
+}
+
 void drawCasa() {
-    header("Casa");
+    header(i18n::text("Casa"));
     if(!settings.favoriteCount) {
         ui::icon(canvas,ui::Icon::House,233,210,76,ui::accent);
-        text("Scegli i preferiti",290,ui::white,2);
-        text("da Home Assistant",332,ui::muted,1);
+        text(i18n::text("Scegli i preferiti"),290,ui::white,2);
+        text(i18n::text("da Home Assistant"),332,ui::muted,1);
         return;
     }
-    const bool fresh=favoriteFresh(),on=fresh&&states[favorite]=="on";
+    const bool fresh=favoriteFresh();
+    const bool cached=policy::usableState(settings.favorites[favorite].entity.c_str(),states[favorite].c_str());
+    const bool on=cached && states[favorite]=="on";
+    const bool direct=settings.favoritesMqtt?mqtt.connected():WiFi.status()==WL_CONNECTED;
+    const bool phone=settings.favoritesMqtt && !direct && mqtt.available();
+    ui::connectionIcon(canvas,354,79,direct,phone,surfaceColor);
     const auto service=policy::service(settings.favorites[favorite].entity.c_str());
     const bool toggle=service=="toggle";
     const uint32_t secondary=surfaceColor==ui::focus?ui::ink:ui::muted;
@@ -422,35 +537,45 @@ void drawCasa() {
     String value,detail;
     ui::Font font=ui::Font::Number;
     if(toggle) {
-        value=fresh?(on?"ON":"OFF"):"--";
-        detail=fresh?(light?(on?"Accesa":"Spenta"):(on?"Attivo":"Disattivo")):"Stato non aggiornato";
+        value=cached?(on?"ON":"OFF"):"--";
+        detail=fresh?(light?(on?i18n::text("Accesa"):i18n::text("Spenta")):(on?i18n::text("Attivo"):i18n::text("Disattivo"))):i18n::text("Stato non aggiornato");
     } else if(!service.empty()) {
-        value=service=="press"?"Premi":"Avvia"; font=ui::Font::Title;
-        detail="Tocca per confermare";
+        value=service=="press"?i18n::text("Premi"):i18n::text("Avvia"); font=ui::Font::Title;
+        detail=i18n::text("Tocca per confermare");
     } else {
-        value=fresh?states[favorite]:"--";
+        value=cached?states[favorite]:"--";
         char* end=nullptr; strtof(value.c_str(),&end);
         if(end==value.c_str() || *end!='\0') font=ui::Font::Title;
         else font=ui::Font::Clock;
-        detail=fresh?units[favorite]:"Stato non aggiornato";
+        detail=fresh?units[favorite]:i18n::text("Stato non aggiornato");
     }
     ui::label(canvas,value,233,277,font,foregroundColor,surfaceColor,310);
-    if(homeCommand.pending(favorite)) detail="Verifica stato…";
-    else if(settings.favoritesMqtt && !mqtt.available()) detail="Collega Wi-Fi o iPhone";
-    else if(!settings.favoritesMqtt && WiFi.status()!=WL_CONNECTED) detail="Wi-Fi non connesso";
-    else if(!fresh && (settings.favoritesMqtt?mqtt.busy():home.busy())) detail="Aggiornamento…";
-    else if(states[favorite]=="unavailable" || states[favorite]=="unknown") detail="Entita non disponibile";
-    ui::label(canvas,detail,233,386,ui::Font::Body,secondary,surfaceColor,310);
+    if(homeCommand.pending(favorite)) detail=i18n::text("Verifica stato…");
+    else if(settings.favoritesMqtt && !mqtt.available()) detail=i18n::text("Collega Wi-Fi o iPhone");
+    else if(!settings.favoritesMqtt && WiFi.status()!=WL_CONNECTED) detail=i18n::text("Wi-Fi non connesso");
+    else if(!fresh && (settings.favoritesMqtt?mqtt.busy():home.busy())) detail=i18n::text("Aggiornamento…");
+    else if(states[favorite]=="unavailable" || states[favorite]=="unknown") detail=i18n::text("Entita non disponibile");
+    if(!fresh && cached) detail=homeCommand.pending(favorite)?i18n::text("Ultimo stato · verifica…"):direct || phone?i18n::text("Ultimo stato · aggiorno…"):i18n::text("Ultimo stato · offline");
+    ui::label(canvas,detail,233,favoriteCanDim()?341:386,ui::Font::Body,secondary,surfaceColor,310);
     arrows();
-    ui::dots(canvas,favorite,settings.favoriteCount,419,foregroundColor,surfaceColor==ui::focus?ui::focusPanel:ui::line);
+    if(favoriteCanDim()) {
+        ui::icon(canvas,ui::Icon::Sun,194,388,24,foregroundColor,surfaceColor);
+        const String level=lightLevels[favorite]>=0?String(lightLevels[favorite])+"%":"--%";
+        ui::label(canvas,level,250,388,ui::Font::Body,foregroundColor,surfaceColor,100);
+        if(casaHoldProgress>0) {
+            canvas.fillRoundRect(183,416,100,4,2,surfaceColor==ui::focus?ui::focusPanel:ui::line);
+            canvas.fillRoundRect(183,416,std::max(4,casaHoldProgress),4,2,foregroundColor);
+        }
+    }
+    ui::dots(canvas,favorite,settings.favoriteCount,434,foregroundColor,surfaceColor==ui::focus?ui::focusPanel:ui::line);
 }
 
 void drawNotes() {
-    header("Note");
-    text("Un'idea al volo.",143,ui::white,2);
+    header(i18n::text("Note"));
+    text(i18n::text("Un'idea al volo."),143,ui::white,2);
     ui::circleButton(canvas,ui::recordButton,ui::Icon::Mic,57,ui::accent,ui::ink);
-    ui::label(canvas,String(notes.count())+" note sul dispositivo",233,335,ui::Font::Small,ui::muted);
-    ui::pill(canvas,233,386,230,notes.playing()?"Ferma ascolto":"Ultima nota");
+    ui::label(canvas,String(notes.count())+i18n::text(" note sul dispositivo"),233,335,ui::Font::Small,ui::muted);
+    ui::pill(canvas,233,386,230,notes.playing()?i18n::text("Ferma ascolto"):i18n::text("Ultima nota"));
     if(!notes.playing()) ui::icon(canvas,ui::Icon::Play,143,386,20,ui::white,ui::surface);
 }
 
@@ -458,15 +583,15 @@ void drawRecording() {
     const auto state=notes.state();
     if(state==VoiceNotes::State::Preparing) {
         ui::icon(canvas,ui::Icon::Mic,233,207,86,ui::accent);
-        text("Preparazione",119,ui::white,2);
-        text("Attendi REC",299,ui::accent,2);
-        text("Il microfono si sta attivando",342,ui::muted,1);
+        text(i18n::text("Preparazione"),119,ui::white,2);
+        text(i18n::text("Attendi REC"),299,ui::accent,2);
+        text(i18n::text("Il microfono si sta attivando"),342,ui::muted,1);
     } else if(state==VoiceNotes::State::Saving) {
         ui::icon(canvas,ui::Icon::Archive,233,222,76,ui::accent);
-        text("Salvataggio…",315,ui::white,2);
+        text(i18n::text("Salvataggio…"),315,ui::white,2);
     } else {
         canvas.fillSmoothCircle(144,86,5,red);
-        ui::label(canvas,"REGISTRAZIONE",245,86,ui::Font::Small,ui::ink,surfaceColor,245);
+        ui::label(canvas,i18n::text("REGISTRAZIONE"),245,86,ui::Font::Small,ui::ink,surfaceColor,245);
         const int seconds=int(notes.seconds());
         char duration[12]; snprintf(duration,sizeof(duration),"%d:%02d",seconds/60,seconds%60);
         ui::label(canvas,duration,233,191,ui::Font::Number,ui::ink,surfaceColor,330);
@@ -477,15 +602,15 @@ void drawRecording() {
     }
     canvas.fillSmoothCircle(233,382,44,state==VoiceNotes::State::Recording?ui::ink:ui::surface);
     canvas.fillSmoothRoundRect(220,369,26,26,5,state==VoiceNotes::State::Recording?ui::focus:ui::white);
-    ui::label(canvas,touchRecording?"Tocca per salvare":"Rilascia B per salvare",233,435,ui::Font::Small,
+    ui::label(canvas,touchRecording?i18n::text("Tocca per salvare"):i18n::text("Rilascia B per salvare"),233,435,ui::Font::Small,
         state==VoiceNotes::State::Recording?ui::ink:ui::muted,surfaceColor,216);
 }
 
 void drawSaved() {
     ui::icon(canvas,ui::Icon::Check,233,161,87,ui::ink,ui::focus);
-    ui::label(canvas,"Idea salvata.",233,256,ui::Font::Title,ui::ink,ui::focus);
-    ui::label(canvas,"Sul dispositivo",233,313,ui::Font::Body,ui::ink,ui::focus);
-    ui::pill(canvas,233,386,206,"Fine",ui::ink,ui::focus);
+    ui::label(canvas,i18n::text("Idea salvata."),233,256,ui::Font::Title,ui::ink,ui::focus);
+    ui::label(canvas,i18n::text("Sul dispositivo"),233,313,ui::Font::Body,ui::ink,ui::focus);
+    ui::pill(canvas,233,386,206,i18n::text("Fine"),ui::ink,ui::focus);
 }
 
 void drawPairing() {
@@ -493,155 +618,186 @@ void drawPairing() {
     if(companion.pairing()) {
         char code[7]; snprintf(code,sizeof(code),"%06lu",(unsigned long)companion.passkey());
         ui::label(canvas,code,233,224,ui::Font::Clock,ui::white,ui::black,340);
-        text("Inserisci il codice su iPhone",296,ui::muted,1);
-        text("Abbinamento aperto per 90 s",330,ui::muted,1);
-        ui::pill(canvas,233,386,240,"Nuovo codice");
+        text(i18n::text("Inserisci il codice su iPhone"),296,ui::muted,1);
+        text(i18n::text("Abbinamento aperto per 90 s"),330,ui::muted,1);
+        ui::pill(canvas,233,386,240,i18n::text("Nuovo codice"));
     } else {
         ui::icon(canvas,ui::Icon::Bluetooth,233,159,55,ui::accent);
-        text(companion.connected()?"iPhone connesso":"Pronto per abbinare",219,ui::white,2);
-        text(String(companion.bondedPhones())+" abbinamenti salvati",256,ui::muted,1);
-        ui::pill(canvas,233,311,296,"Abbina iPhone",forgetOption?ui::surface:ui::accent,forgetOption?ui::white:ui::ink);
-        ui::pill(canvas,233,382,296,"Rimuovi abbinamenti",forgetOption?ui::accent:ui::surface,forgetOption?ui::ink:ui::white);
+        text(companion.connected()?i18n::text("iPhone connesso"):i18n::text("Pronto per abbinare"),219,ui::white,2);
+        text(String(companion.bondedPhones())+i18n::text(" abbinamenti salvati"),256,ui::muted,1);
+        ui::pill(canvas,233,311,296,i18n::text("Abbina iPhone"),forgetOption?ui::surface:ui::accent,forgetOption?ui::white:ui::ink);
+        ui::pill(canvas,233,382,296,i18n::text("Rimuovi abbinamenti"),forgetOption?ui::accent:ui::surface,forgetOption?ui::ink:ui::white);
     }
 }
 
 void drawConfirmation() {
-    header(screen==Screen::ActionConfirm?"Conferma":"Attenzione");
-    ui::icon(canvas,ui::Icon::Warning,233,157,53,screen==Screen::ActionConfirm?ui::accent:red);
-    if(screen==Screen::ActionConfirm) {
-        text("Eseguire il comando?",215,ui::white,2);
-        text(favorite<settings.favoriteCount?settings.favorites[favorite].label:"Preferito modificato",260,ui::muted,1);
-        ui::pill(canvas,157,331,115,"Annulla");
-        ui::pill(canvas,309,331,115,"Esegui",ui::accent,ui::ink);
+    const bool ordinary=screen==Screen::ActionConfirm || screen==Screen::LightConfirm;
+    header(ordinary?i18n::text("Conferma"):i18n::text("Attenzione"));
+    ui::icon(canvas,ui::Icon::Warning,233,157,53,ordinary?ui::accent:red);
+    if(screen==Screen::LightConfirm) {
+        text(i18n::text("Applico il nuovo livello?"),210,ui::white,2);
+        text(String(lightDraft.value)+"%",262,ui::accent,2);
+        ui::pill(canvas,157,331,115,i18n::text("Annulla"));
+        ui::pill(canvas,309,331,115,i18n::text("Applica"),ui::accent,ui::ink);
+    } else if(screen==Screen::ActionConfirm) {
+        text(i18n::text("Eseguire il comando?"),215,ui::white,2);
+        text(favorite<settings.favoriteCount?settings.favorites[favorite].label:i18n::text("Preferito modificato"),260,ui::muted,1);
+        ui::pill(canvas,157,331,115,i18n::text("Annulla"));
+        ui::pill(canvas,309,331,115,i18n::text("Esegui"),adjustOption?ui::surface:ui::accent,adjustOption?ui::white:ui::ink);
+        if(favoriteCanDim()) ui::pill(canvas,233,391,240,i18n::text("Regola"),adjustOption?ui::accent:ui::surface,adjustOption?ui::ink:ui::white);
     } else {
-        text(screen==Screen::FormatConfirm?"Eliminare note e Badge?":"Rimuovere gli iPhone?",223,ui::white,2);
-        text(screen==Screen::FormatConfirm?"L'archivio sara cancellato":"Tutti gli abbinamenti saranno rimossi",270,ui::muted,1);
-        text("Conferma con il pulsante B",320,red,1);
-        ui::pill(canvas,233,386,266,"Annulla");
+        text(screen==Screen::FormatConfirm?i18n::text("Eliminare note e Badge?"):i18n::text("Rimuovere gli iPhone?"),223,ui::white,2);
+        text(screen==Screen::FormatConfirm?i18n::text("L'archivio sara cancellato"):i18n::text("Tutti gli abbinamenti saranno rimossi"),270,ui::muted,1);
+        text(i18n::text("Conferma con il pulsante B"),320,red,1);
+        ui::pill(canvas,233,386,266,i18n::text("Annulla"));
     }
 }
 
 void drawPortal() {
-    header("Browser Wi-Fi");
+    header(i18n::text("Browser Wi-Fi"));
     if(portal.active()) {
         canvas.fillRoundRect(132,129,202,202,10,ui::white);
         const String qr=showPageQr?portal.url():portal.wifiQr();
         canvas.qrcode(qr.c_str(),141,138,184,showPageQr?3:4,true);
-        text(showPageQr?"2 · Apri la pagina":"1 · Unisci il Wi-Fi",350,ui::white,1);
+        text(showPageQr?i18n::text("2 · Apri la pagina"):i18n::text("1 · Unisci il Wi-Fi"),350,ui::white,1);
         text(String("stopwatch / ")+portal.password(),385,ui::accent,1,305);
-        text("Tocca per cambiare QR",421,ui::muted,1,230);
+        text(i18n::text("Tocca per cambiare QR"),421,ui::muted,1,230);
     } else {
-        text("Sessione terminata",223,ui::white,2);
-        ui::pill(canvas,233,386,266,"Riapri");
+        text(i18n::text("Sessione terminata"),223,ui::white,2);
+        ui::pill(canvas,233,386,266,i18n::text("Riapri"));
     }
 }
 
 void drawNotice() {
-    noticeDisplayed=!notice.isEmpty() && uint32_t(millis()-noticeAt)<4500 && !notes.busy() &&
+    noticeDisplayed=!notice.isEmpty() && uint32_t(millis()-noticeAt)<noticeDuration && !notes.busy() &&
         screen!=Screen::Companion && screen!=Screen::NoteSaved;
     if(!noticeDisplayed) return;
-    const auto card=ui::noticeCard;
-    canvas.fillSmoothRoundRect(card.x,card.y,card.width,card.height,22,ui::line);
-    canvas.fillSmoothRoundRect(card.x+1,card.y+1,card.width-2,card.height-2,21,ui::surface);
-    ui::icon(canvas,ui::Icon::Close,card.x+card.width-20,card.y+card.height/2,16,ui::muted,ui::surface);
-    const int contentWidth=card.width-60, textX=card.x+20+contentWidth/2, textY=card.y+card.height/2;
-    String first=notice,second;
-    while(first.length()>1) {
-        if(ui::textWidth(canvas,first,ui::Font::Small)<=contentWidth) break;
+    String first=notice,second=noticeDetail;
+    while(noticeDetail.isEmpty() && first.length()>1) {
+        if(ui::textWidth(canvas,first,ui::Font::Body)<=212) break;
         const int space=first.lastIndexOf(' ');
         if(space<=0) break;
         second=first.substring(space+1)+(second.isEmpty()?"":" "+second);
         first=first.substring(0,space);
     }
-    ui::label(canvas,first,textX,second.isEmpty()?textY:textY-11,ui::Font::Small,ui::white,ui::surface,contentWidth);
-    if(!second.isEmpty()) ui::label(canvas,second,textX,textY+13,ui::Font::Small,ui::white,ui::surface,contentWidth);
+    scene_ui::notice(canvas,first,second,noticeIcon);
 }
 
 void drawDiagnostics() {
-    header("Diagnostica");
-    text(diagnostics[diagnostic],135,ui::white,2);
+    header(i18n::text("Diagnostica"));
+    text(i18n::text(diagnostics[diagnostic]),135,ui::white,2);
         switch (diagnostic) {
         case 0:
-            text(String("A: ") + (M5.BtnA.isPressed() ? "PREMUTO" : "rilasciato"), 207, yellow);
-            text(String("B: ") + (M5.BtnB.isPressed() ? "PREMUTO" : "rilasciato"), 253, blue);
-            text(String("Pressioni A / B: ") + pressesA + " / " + pressesB, 305, muted, 1); break;
+            text(String("A: ") + (M5.BtnA.isPressed() ? i18n::text("PREMUTO") : "rilasciato"), 207, yellow);
+            text(String("B: ") + (M5.BtnB.isPressed() ? i18n::text("PREMUTO") : "rilasciato"), 253, blue);
+            text(String(i18n::text("Pressioni A / B: ")) + pressesA + " / " + pressesB, 305, muted, 1); break;
         case 1:
-            text(M5.Touch.isEnabled() ? "Tocca lo schermo" : "Touch non rilevato", 215, blue);
+            text(M5.Touch.isEnabled() ? i18n::text("Tocca lo schermo") : i18n::text("Touch non rilevato"), 215, blue);
             text(String("X ") + touchX + "   Y " + touchY, 273);
             if (touchX >= 0) { canvas.drawCircle(touchX, touchY, 12, accent); } break;
         case 2: {
             const uint32_t colors[] = {red, accent, blue, 0xffffff, 0x000000};
             canvas.fillRoundRect(95, 177, 276, 132, 15, colors[displayColor]);
             canvas.drawRoundRect(95, 177, 276, 132, 15, muted);
-            text("B cambia colore · verifica i pixel", 332, muted, 1); break;
+            text(i18n::text("B cambia colore · verifica i pixel"), 332, muted, 1); break;
         }
-        case 3: text("B: impulso di 250 ms", 225, blue); text("Verifica manuale della vibrazione", 285, muted, 1); break;
-        case 4: text("B: tono breve", 216, blue); text(String("Volume: ") + settings.volume*100/200 + "%", 270); break;
+        case 3: text(i18n::text("B: impulso di 250 ms"), 225, blue); text(i18n::text("Verifica manuale della vibrazione"), 285, muted, 1); break;
+        case 4: text(i18n::text("B: tono breve"), 216, blue); text(String("Volume: ") + settings.volume*100/200 + "%", 270); break;
         case 5:
-            text(M5.Mic.isEnabled() ? "Microfono configurato" : "Microfono assente", 209, blue);
-            text("Tieni B per una nota di prova", 258, muted, 1);
-            text("B breve riascolta l'ultima nota", 302, muted, 1); break;
+            text(M5.Mic.isEnabled() ? i18n::text("Microfono configurato") : i18n::text("Microfono assente"), 209, blue);
+            text(i18n::text("Tieni B per una nota di prova"), 258, muted, 1);
+            text(i18n::text("B breve riascolta l'ultima nota"), 302, muted, 1); break;
         case 6:
-            text(M5.Imu.isEnabled() ? "BMI270 rilevato" : "IMU non rilevata", 191, blue);
+            text(M5.Imu.isEnabled() ? i18n::text("BMI270 rilevato") : i18n::text("IMU non rilevata"), 191, blue);
             text(String("Accel ") + String(imu.accel.x, 2) + " " + String(imu.accel.y, 2) + " " + String(imu.accel.z, 2), 242, 0xffffff, 1);
             text(String("Gyro ") + String(imu.gyro.x, 1) + " " + String(imu.gyro.y, 1) + " " + String(imu.gyro.z, 1), 283, 0xffffff, 1); break;
         case 7: {
             m5::rtc_datetime_t rtc{};
             const bool valid = M5.Rtc.getDateTime(&rtc);
-            text(valid ? "RTC rilevato · UTC" : "RTC non leggibile", 198, blue);
+            text(valid ? i18n::text("RTC rilevato · UTC") : i18n::text("RTC non leggibile"), 198, blue);
             char stamp[40];
             snprintf(stamp, sizeof(stamp), "%04d-%02d-%02d  %02d:%02d:%02d", rtc.date.year, rtc.date.month, rtc.date.date, rtc.time.hours, rtc.time.minutes, rtc.time.seconds);
             text(stamp, 248, 0xffffff, 1);
-            text(M5.Rtc.getVoltLow() ? "Ora da sincronizzare" : "Sincronizza da Wi-Fi o iPhone", 300, muted, 1); break;
+            text(M5.Rtc.getVoltLow() ? i18n::text("Ora da sincronizzare") : i18n::text("Sincronizza da Wi-Fi o iPhone"), 300, muted, 1); break;
         }
         case 8:
             text(String(batteryMv) + " mV", 201, blue, 3);
-            text(String("Carica stimata: ") + batteryLevel + "%", 260, 0xffffff, 1);
+            text(String(i18n::text("Carica stimata: ")) + batteryLevel + "%", 260, 0xffffff, 1);
             text(String("USB: ") + M5.Power.getVBUSVoltage() + " mV", 293, muted, 1);
-            text(M5.Power.isCharging() == m5::Power_Class::is_charging ? "In carica" : "Carica non attiva / non rilevata", 325, muted, 1); break;
+            text(M5.Power.isCharging() == m5::Power_Class::is_charging ? i18n::text("In carica") : i18n::text("Carica non attiva / non rilevata"), 325, muted, 1); break;
         case 9:
-            text(WiFi.status() == WL_CONNECTED ? "CONNESSO" : "NON CONNESSO", 198, blue);
-            text(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "B apre la configurazione", 247, 0xffffff, 1);
-            text(String("Segnale: ") + (WiFi.status() == WL_CONNECTED ? String(WiFi.RSSI()) + " dBm" : "--"), 294, muted, 1); break;
+            text(WiFi.status() == WL_CONNECTED ? i18n::text("CONNESSO") : i18n::text("NON CONNESSO"), 198, blue);
+            text(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : i18n::text("B apre la configurazione"), 247, 0xffffff, 1);
+            text(String(i18n::text("Segnale: ")) + (WiFi.status() == WL_CONNECTED ? String(WiFi.RSSI()) + " dBm" : "--"), 294, muted, 1); break;
         case 10:
-            text(companion.connected() ? "iPhone connesso e autenticato" : companion.ready() ? "Companion BLE attivo" : "BLE non disponibile", 204, blue, 1);
+            text(companion.connected() ? i18n::text("iPhone connesso e autenticato") : companion.ready() ? i18n::text("Companion BLE attivo") : i18n::text("BLE non disponibile"), 204, blue, 1);
             text(companion.name(), 253, 0xffffff, 1);
-            text(String(companion.bondedPhones()) + " abbinamenti salvati", 295, muted, 1);
-            text("B: abbinamento iPhone", 327, muted, 1); break;
+            text(String(companion.bondedPhones()) + i18n::text(" abbinamenti salvati"), 295, muted, 1);
+            text(i18n::text("B: abbinamento iPhone"), 327, muted, 1); break;
         case 11:
-            text(memoryOk ? "PSRAM: prova superata" : "PSRAM: prova fallita", 190, memoryOk ? accent : red, 1);
-            text(String("PSRAM libera: ") + ESP.getFreePsram() / 1024 + " KB", 230, muted, 1);
-            text(notes.ready() ? String("Archivio: ") + LittleFS.usedBytes() / 1024 + " / " + LittleFS.totalBytes() / 1024 + " KB" : "Archivio non inizializzato", 270, blue, 1);
-            text("B: inizializza / cancella archivio", 312, muted, 1); break;
+            text(memoryOk ? i18n::text("PSRAM: prova superata") : i18n::text("PSRAM: prova fallita"), 190, memoryOk ? accent : red, 1);
+            text(String(i18n::text("PSRAM libera: ")) + ESP.getFreePsram() / 1024 + " KB", 230, muted, 1);
+            text(notes.ready() ? String(i18n::text("Archivio: ")) + LittleFS.usedBytes() / 1024 + " / " + LittleFS.totalBytes() / 1024 + " KB" : i18n::text("Archivio non inizializzato"), 270, blue, 1);
+            text(i18n::text("B: inizializza / cancella archivio"), 312, muted, 1); break;
         case 12:
             text("Grove I2C: SDA 10 / SCL 11", 196, blue, 1);
-            text(groveResult.isEmpty() ? "B: scansione indirizzi I2C" : groveResult, 244, 0xffffff, 1);
-            text("Uscita 5 V disattivata", 285, muted, 1);
-            text("GPIO posteriori: serve un fixture", 323, muted, 1); break;
-        case 13: text(ledOn ? "LED acceso" : "LED spento", 222, blue); text("B cambia · verifica visiva", 281, muted, 1); break;
+            text(groveResult.isEmpty() ? i18n::text("B: scansione indirizzi I2C") : groveResult, 244, 0xffffff, 1);
+            text(i18n::text("Uscita 5 V disattivata"), 285, muted, 1);
+            text(i18n::text("GPIO posteriori: serve un fixture"), 323, muted, 1); break;
+        case 13: text(ledOn ? i18n::text("LED acceso") : i18n::text("LED spento"), 222, blue); text(i18n::text("B cambia · verifica visiva"), 281, muted, 1); break;
         }
-    footer("Test dopo","Prova");
+    footer(i18n::text("Test dopo"),i18n::text("Prova"));
 }
 
 void draw() {
-    const bool lit=screen==Screen::HomeAssistant && favoriteFresh() && states[favorite]=="on";
+    const uint32_t keyPrompt=security_key::promptId();
+    const bool lit=screen==Screen::HomeAssistant && favorite<settings.favoriteCount && states[favorite]=="on";
     const bool recording=notes.state()==VoiceNotes::State::Recording;
     surfaceColor=!quickPanelOpen && (recording || (!notes.busy() && (lit || screen==Screen::NoteSaved)))?ui::focus:ui::black;
     foregroundColor=surfaceColor==ui::focus?ui::ink:ui::white;
     canvas.fillScreen(surfaceColor);
-    if(quickPanelOpen) ui::quickSettings(canvas,settings.doNotDisturb,quietSavePending,quietSaveFailed);
+    if(quickPanelOpen) ui::quickSettings(canvas,settings.doNotDisturb,quietSavePending,quietSaveFailed,quickPage,quickPreview>=0?quickPreview:quickPage==1?settings.brightness:settings.volume);
     else if(notes.busy()) drawRecording();
     else switch(screen) {
     case Screen::Home: drawHome(); break;
+    case Screen::SecurityKey: {
+        header(i18n::text("Chiave · LAB"));
+        ui::icon(canvas,ui::Icon::Key,233,145,58,security_key::awaiting()?ui::focus:ui::accent);
+        const String rp=security_key::awaiting()?security_key::relyingParty():String();
+        const int lines=(rp.length()+19)/20;
+        if(!rp.length()) ui::label(canvas,i18n::text("Prototipo reversibile"),233,230,ui::Font::Label,ui::white,ui::black,320);
+        else for(int i=0;i<lines;++i)
+            ui::label(canvas,rp.substring(i*20,std::min(int(rp.length()),(i+1)*20)),233,230-(lines-1)*12+i*24,ui::Font::Small,ui::white,ui::black,340);
+        ui::label(canvas,security_key::message(),233,lines>2?302:279,ui::Font::Small,ui::muted,ui::black,330);
+        if(security_key::awaiting()) {
+            ui::pill(canvas,233,342,272,i18n::text("B blu · Conferma"),ui::focusPanel,ui::focus);
+            ui::label(canvas,i18n::text("A · Annulla"),233,396,ui::Font::Small,ui::muted);
+        } else {
+            ui::label(canvas,i18n::text("Solo account di prova"),233,352,ui::Font::Body,ui::muted);
+            ui::label(canvas,i18n::text("A lungo · Esci"),233,398,ui::Font::Small,ui::muted);
+        }
+        break;
+    }
+    case Screen::UsbControl:
+        header(i18n::text("Ponte"));
+        ui::icon(canvas,ui::Icon::Usb,233,183,85,usbControl.connected()?ui::accent:ui::muted);
+        text(usbControl.fault()?i18n::text("Connessione interrotta"):usbPaused?i18n::text("In pausa"):usbControl.connected()?i18n::text("Mouse e tastiera"):i18n::text("Collega il cavo USB-C"),270,ui::white,2);
+        text(companion.connected()?i18n::text("Controlla dal Companion"):i18n::text("Apri il Companion sull'iPhone"),310,ui::muted,1);
+        ui::pill(canvas,233,372,240,usbPaused || usbControl.fault()?i18n::text("Riprendi"):i18n::text("Sospendi"));
+        break;
     case Screen::System: drawSystem(); break;
+    case Screen::SettingsMenu: drawSettingsMenu(); break;
+    case Screen::SettingsSection: drawSettingsSection(); break;
     case Screen::Settings: drawSettings(); break;
     case Screen::HomeAssistant: drawCasa(); break;
+    case Screen::Light: drawLight();break;
     case Screen::Notes: drawNotes(); break;
     case Screen::Badge: drawBadge(); break;
     case Screen::Spotify: {
         const bool artwork=musicArtwork.draw(canvas);
-        const String message=!mqtt.available()?"Collega Wi-Fi o iPhone":mqtt.musicMessage();
+        const String message=!mqtt.available()?i18n::text("Offline · ultimo brano"):!mqtt.playback().fresh(millis()) && !mqtt.playback().title.empty()?i18n::text("Ultimo stato · aggiorno…"):mqtt.musicMessage();
         music_ui::player(canvas,mqtt.playback(),millis(),mqtt.musicBusy(),message,artwork,musicArtwork.background());
+        ui::connectionIcon(canvas,365,75,mqtt.connected(),!mqtt.connected() && mqtt.available(),musicArtwork.background());
         break;
     }
     case Screen::MusicSources: music_ui::sources(canvas,mqtt.playback(),musicSource,mqtt.musicBusy());break;
@@ -653,12 +809,15 @@ void draw() {
         clock_ui::watch(canvas,clockwork::Face(settings.clockFace),local,epoch>=1704067200,clockControls());
         clockDrawnSecond=epoch;break;
     }
+    case Screen::Focus: productivity_ui::focus(canvas,focusSession);break;
+    case Screen::Slides: productivity_ui::slides(canvas,presentationTime.elapsed(),usbControl.connected());break;
     case Screen::Timer: clock_ui::timer(canvas,clockTimer);break;
     case Screen::Stopwatch: clock_ui::stopwatch(canvas,chronometer);break;
     case Screen::NoteSaved: drawSaved(); break;
     case Screen::Pairing: drawPairing(); break;
     case Screen::Companion: drawPortal(); break;
     case Screen::ActionConfirm:
+    case Screen::LightConfirm:
     case Screen::FormatConfirm:
     case Screen::ForgetConfirm: drawConfirmation(); break;
     case Screen::Diagnostics: drawDiagnostics(); break;
@@ -666,6 +825,7 @@ void draw() {
     if(quickPanelOpen) noticeDisplayed=false;
     else drawNotice();
     canvas.pushSprite(0,0);
+    if(screen==Screen::SecurityKey && !quickPanelOpen && !screenOff) security_key::presented(keyPrompt);
     dirty=false;
     lastDraw=millis();
 }
@@ -673,16 +833,16 @@ void draw() {
 void diagnosticAction() {
     sfx::stop();
     if(settings.doNotDisturb && (diagnostic==3 || diagnostic==4 || diagnostic==5 || diagnostic==13)) {
-        toast("Non disturbare attivo");return;
+        toast(i18n::text("Non disturbare attivo"));return;
     }
     switch (diagnostic) {
     case 2: displayColor = (displayColor + 1) % 5; break;
     case 3: vibrate(250, true); break;
     case 4:
-        if(notes.playing()) { toast("Ferma prima l'ascolto della nota"); break; }
+        if(notes.playing()) { toast(i18n::text("Ferma prima l'ascolto della nota")); break; }
         M5.Mic.end();
         if (M5.Speaker.begin()) { M5.Speaker.setVolume(policy::speakerVolume(settings.volume)); M5.Speaker.tone(880, 180); }
-        else toast("Avvio altoparlante fallito");
+        else toast(i18n::text("Avvio altoparlante fallito"));
         break;
     case 5: playNote(); break;
     case 9: changeScreen(Screen::Companion); break;
@@ -696,7 +856,7 @@ void diagnosticAction() {
                 char hex[8]; snprintf(hex, sizeof(hex), "0x%02x ", address); groveResult += hex;
             }
         }
-        if (groveResult.isEmpty()) groveResult = "Nessun dispositivo alimentato rilevato";
+        if (groveResult.isEmpty()) groveResult = i18n::text("Nessun dispositivo alimentato rilevato");
         break;
     }
     case 13: ledOn = !ledOn; M5.Power.setLed(ledOn ? 255 : 0); break;
@@ -716,7 +876,7 @@ void commitSetting(int value) {
     case 6: next.noteVolume=value; break;
     }
     settingPreview=-1;
-    if(!next.save()) { applySettings(); toast("Impostazioni non salvate"); return; }
+    if(!next.save()) { applySettings(); toast(i18n::text("Impostazioni non salvate")); return; }
     settings=next;
     applySettings();
     mqtt.changed();
@@ -726,52 +886,85 @@ void commitSetting(int value) {
 }
 
 bool executeFavorite() {
-    if(favorite>=settings.favoriteCount) { toast("Scegli i preferiti in Home Assistant"); return false; }
-    if(settings.favoritesMqtt?mqtt.busy():home.busy()) { toast("Attendi la risposta di Home Assistant"); return false; }
+    if(favorite>=settings.favoriteCount) { toast(i18n::text("Scegli i preferiti in Home Assistant")); return false; }
+    if(settings.favoritesMqtt?mqtt.busy():home.busy()) { toast(i18n::text("Attendi la risposta di Home Assistant")); return false; }
     const auto service=policy::service(settings.favorites[favorite].entity.c_str());
     const bool action=!service.empty();
-    if(action && homeCommand.pending()) { toast("Attendi la verifica del comando"); return false; }
+    if(action && homeCommand.pending()) { toast(i18n::text("Attendi la verifica del comando")); return false; }
     if(service=="toggle" && !favoriteFresh()) {
         if(settings.favoritesMqtt) mqtt.requestFavorite(favorite,false);
         else if(homeReady) home.request(settings,favorite,false);
-        toast("Aggiorno lo stato: riprova"); return false;
+        toast(i18n::text("Aggiorno lo stato: riprova")); return false;
     }
     if(settings.favoritesMqtt?mqtt.requestFavorite(favorite,action):homeReady&&home.request(settings,favorite,action)) {
         lastHaRead=millis();
         if(service=="toggle") homeCommand.begin(favorite,states[favorite]=="on",millis());
         if(action) stateUpdated[favorite]=0;
-        if(action) toast("Invio comando…");
+        if(action) toast(i18n::text("Invio comando…"));
         else dirty=true;
         return true;
-    } else toast("Controlla rete e orologio");
+    } else toast(i18n::text("Controlla rete e orologio"));
     return false;
+}
+
+bool applyLight() {
+    if(favorite!=lightFavorite || favorite>=settings.favoriteCount || settings.favorites[favorite].entity!=lightEntity) {
+        toast(i18n::text("Preferito modificato: riapri la luce"));return false;
+    }
+    if(!favoriteCanDim() || homeCommand.pending() || (settings.favoritesMqtt?mqtt.busy():home.busy())) {
+        toast(i18n::text("Attendi lo stato aggiornato della luce"));return false;
+    }
+    if(!(settings.favoritesMqtt?mqtt.requestFavorite(favorite,true,lightDraft.value):homeReady&&home.request(settings,favorite,true,lightDraft.value))) {
+        toast(i18n::text("Invio non riuscito: controlla la connessione"));return false;
+    }
+    homeCommand.begin(favorite,states[favorite]=="on",millis(),lightDraft.value);
+    stateUpdated[favorite]=0;lastHaRead=millis();
+    changeScreen(Screen::HomeAssistant);toast(i18n::text("Invio intensità…"));return true;
 }
 
 bool musicCommand(music::Command command,const String& source="") {
     if(mqtt.requestMusic(command,source)) { lastMusicRead=millis();dirty=true;sound(sfx::Cue::Select);return true; }
-    else if(!mqtt.available()) toast("Collega Wi-Fi o iPhone");
-    else if(mqtt.musicBusy()) toast("Attendi Spotify");
-    else if(!mqtt.playback().fresh(millis())) { mqtt.requestMusic();toast("Aggiorno Spotify…"); }
-    else toast("Comando non disponibile sul lettore");
+    else if(!mqtt.available()) toast(i18n::text("Collega Wi-Fi o iPhone"));
+    else if(mqtt.musicBusy()) toast(i18n::text("Attendi Spotify"));
+    else if(!mqtt.playback().fresh(millis())) { mqtt.requestMusic();toast(i18n::text("Aggiorno Spotify…")); }
+    else toast(i18n::text("Comando non disponibile sul lettore"));
     return false;
 }
 
 void playlistPage(uint32_t offset) {
     if(mqtt.requestMusic(music::Command::Playlists,"",offset)) {
         playlistRequested=true;playlistItem=0;lastMusicRead=millis();dirty=true;
-    } else toast(mqtt.available()?"Attendi Spotify":"Collega Wi-Fi o iPhone");
+    } else toast(mqtt.available()?i18n::text("Attendi Spotify"):i18n::text("Collega Wi-Fi o iPhone"));
+}
+
+void slideKey(bool next,bool blackout=false) {
+    if(!usbControl.connected()) { toast(i18n::text("Collega il cavo USB dati"));return; }
+    const uint8_t key=blackout?0x05:settings.presentationPageKeys?(next?0x4e:0x4b):(next?0x4f:0x50);
+    if(!usbControl.presentationKey({key,0})) { toast(i18n::text("USB occupata: riprova"));return; }
+    sound(sfx::Cue::Select);dirty=true;
 }
 
 void selectAction(bool fromButton=false) {
+    if(screen==Screen::Slides) { slideKey(true,!fromButton);return; }
+    if(screen==Screen::Focus) { focusSession.toggle(millis());dirty=true;sound(sfx::Cue::Select);return; }
     switch(screen) {
+    case Screen::UsbControl:
+        if(usbControl.fault()) { usbPaused=true;usbControl.update(false,companion.connected(),millis()); }
+        usbPaused=!usbPaused;dirty=true;break;
     case Screen::Home: {
-        const Screen pages[]={Screen::HomeAssistant,Screen::Notes,Screen::Badge,Screen::ClockMenu,Screen::Spotify,Screen::System};
-        changeScreen(pages[selected]); sound(sfx::Cue::Open); break;
+        if(fromButton && !homeMenu.apps) { homeMenu.apps=true;homeMenu.selected=0;sound(sfx::Cue::Select);break; }
+        const Screen pages[]={Screen::HomeAssistant,Screen::Notes,Screen::Badge,Screen::ClockMenu,Screen::Spotify,Screen::UsbControl,Screen::SecurityKey,Screen::System,Screen::Focus,Screen::Slides};
+        homeMenu.apps=true;changeScreen(pages[homeMenu.app()]); sound(sfx::Cue::Open); break;
     }
     case Screen::System: {
-        const Screen pages[]={Screen::Settings,Screen::Diagnostics,Screen::Pairing,Screen::Companion};
+        const Screen pages[]={Screen::SettingsMenu,Screen::Diagnostics,Screen::Pairing,Screen::Companion};
         changeScreen(pages[systemItem]); sound(sfx::Cue::Open); break;
     }
+    case Screen::SettingsMenu:
+        changeScreen(ui::settingsSection(setting)==2?Screen::Settings:Screen::SettingsSection);
+        sound(sfx::Cue::Open);break;
+    case Screen::SettingsSection:
+        changeScreen(Screen::Settings);sound(sfx::Cue::Open);break;
     case Screen::Settings:
         switch(setting) {
         case 0: commitSetting(settings.brightness>=240?32:std::min(255,int(settings.brightness)+32)); break;
@@ -809,34 +1002,42 @@ void selectAction(bool fromButton=false) {
     case Screen::Timer:
         if(clockTimer.state()==clockwork::Timer::State::Idle && settings.timerSeconds!=clockTimer.duration()/1000) {
             Settings next=settings;next.timerSeconds=clockTimer.duration()/1000;
-            if(next.save()) settings=next;else toast("Durata non salvata");
+            if(next.save()) settings=next;else toast(i18n::text("Durata non salvata"));
         }
         clockTimer.toggle(millis());sound(sfx::Cue::Select);break;
     case Screen::Stopwatch:
         if(chronometer.elapsed()==clockwork::Stopwatch::maxElapsed) backAction();else chronometer.toggle(millis());
         sound(sfx::Cue::Select);break;
     case Screen::Badge:
-        if(!badgeApp.available()) { toast("Apri Badge nell'app iPhone"); break; }
+        if(!badgeApp.available()) { toast(i18n::text("Apri Badge nell'app iPhone")); break; }
         if(fromButton && !settings.badgeAutoRotate) {
             badgeApp.rotateManual(); badgeControlsUntil=0;
             sound(sfx::Cue::Select);
         } else if(!badgeControls()) badgeControlsUntil=millis()+4000;
         else if(badgeApp.animated()) {
             Settings next=settings; next.badgeAnimate=!next.badgeAnimate;
-            if(next.save()) settings=next; else toast("Impostazioni Badge non salvate");
+            if(next.save()) settings=next; else toast(i18n::text("Impostazioni Badge non salvate"));
             badgeControlsUntil=millis()+4000;
         } else backAction();
         break;
     case Screen::HomeAssistant:
         if(favorite<settings.favoriteCount && policy::confirmAction(settings.favorites[favorite].entity.c_str())) {
-            if(homeCommand.pending()) { toast("Attendi la verifica del comando"); break; }
+            if(homeCommand.pending()) { toast(i18n::text("Attendi la verifica del comando")); break; }
             changeScreen(Screen::ActionConfirm);
             sound(sfx::Cue::Warning);
         } else executeFavorite();
         break;
     case Screen::ActionConfirm:
+        if(adjustOption) { openLight();break; }
         if(!ui::confirmationReady(millis(),transitionAt)) break;
         if(executeFavorite()) { changeScreen(Screen::HomeAssistant);lastHaRead=millis(); }
+        break;
+    case Screen::Light:
+        if(fromButton) { lightDraft.step(1);dirty=true;sound(sfx::Cue::Select); }
+        else applyLight();
+        break;
+    case Screen::LightConfirm:
+        if(ui::confirmationReady(millis(),transitionAt)) applyLight();
         break;
     case Screen::Notes:
         playNote();
@@ -845,10 +1046,10 @@ void selectAction(bool fromButton=false) {
     case Screen::Pairing:
         if(forgetOption && !companion.pairing()) changeScreen(Screen::ForgetConfirm);
         else if(companion.ready()) { companion.openPairing(); forgetOption=false; }
-        else toast("Companion BLE non disponibile");
+        else toast(i18n::text("Companion BLE non disponibile"));
         break;
     case Screen::ForgetConfirm:
-        companion.forgetPhones(); forgetOption=false; changeScreen(Screen::Pairing); toast("Abbinamenti rimossi"); break;
+        companion.forgetPhones(); forgetOption=false; changeScreen(Screen::Pairing); toast(i18n::text("Abbinamenti rimossi")); break;
     case Screen::Companion:
         if(!portal.active()) portal.start(); else showPageQr=!showPageQr;
         break;
@@ -857,7 +1058,7 @@ void selectAction(bool fromButton=false) {
         badgeApp.abortUpload();
         { const bool initialized=notes.initializeStorage(); badgeApp.begin();
           if(initialized) sfx::begin(settings.soundPack);
-          toast(initialized?"Archivio inizializzato":"Inizializzazione archivio fallita"); }
+          toast(initialized?i18n::text("Archivio inizializzato"):i18n::text("Inizializzazione archivio fallita")); }
         changeScreen(Screen::Diagnostics); break;
     }
     dirty=true;
@@ -865,13 +1066,18 @@ void selectAction(bool fromButton=false) {
 
 void backAction() {
     switch(screen) {
-    case Screen::Settings:
+    case Screen::Home: homeMenu.apps=false;dirty=true;break;
+    case Screen::Settings: changeScreen(ui::settingsSection(setting)==2?Screen::SettingsMenu:Screen::SettingsSection);break;
+    case Screen::SettingsSection: changeScreen(Screen::SettingsMenu);break;
+    case Screen::SettingsMenu:
     case Screen::Diagnostics:
     case Screen::Pairing:
     case Screen::Companion: changeScreen(Screen::System); break;
     case Screen::FormatConfirm: changeScreen(Screen::Diagnostics); break;
     case Screen::ForgetConfirm: changeScreen(Screen::Pairing); break;
-    case Screen::ActionConfirm: changeScreen(Screen::HomeAssistant); break;
+    case Screen::ActionConfirm:
+    case Screen::Light:
+    case Screen::LightConfirm: changeScreen(Screen::HomeAssistant); break;
     case Screen::MusicSources:
     case Screen::MusicPlaylists: changeScreen(Screen::MusicMenu);break;
     case Screen::MusicMenu: changeScreen(Screen::Spotify);break;
@@ -883,10 +1089,14 @@ void backAction() {
     sound(sfx::Cue::Back);
 }
 
-void nextAction(int direction=1) {
+void nextAction(int direction=1,bool page=false) {
     if(settingPreview>=0) { settingPreview=-1; applySettings(); }
+    if(screen==Screen::Slides) { slideKey(page?direction>0:false);return; }
+    if(screen==Screen::Focus) { if(focusSession.reset()) { dirty=true;sound(sfx::Cue::Select); }return; }
     switch(screen) {
-    case Screen::Home: selected=(selected+ui::homeCount+direction)%ui::homeCount; transitionAt=millis(); break;
+    case Screen::Home:
+        if(page || !homeMenu.apps) homeMenu.nextSpace(direction);else homeMenu.nextApp(direction);
+        transitionAt=millis();break;
     case Screen::ClockMenu: clockItem=(clockItem+3+direction)%3;break;
     case Screen::Spotify: musicCommand(direction>0?music::Command::Next:music::Command::Previous);return;
     case Screen::MusicMenu: musicMenu=(musicMenu+1)%2;break;
@@ -904,10 +1114,24 @@ void nextAction(int direction=1) {
     case Screen::Clock: nextClockFace();return;
     case Screen::Timer: timerSecondaryAction();return;
     case Screen::Stopwatch: stopwatchSecondaryAction();return;
-    case Screen::System: systemItem=(systemItem+4+direction)%4; break;
+    case Screen::System: systemItem=page?((systemItem/2+2+direction)%2)*2:(systemItem+4+direction)%4; break;
+    case Screen::SettingsMenu: setting=ui::settingsItems[(ui::settingsSection(setting)+3+direction)%3][0];break;
+    case Screen::SettingsSection: {
+        const int section=ui::settingsSection(setting),count=ui::settingsCount(section),position=ui::settingsPosition(setting);
+        const int pages=(count+1)/2;
+        const int next=page?((position/2+pages+direction)%pages)*2:(position+count+direction)%count;
+        setting=ui::settingsItems[section][next];
+        break;
+    }
     case Screen::Settings: setting=(setting+7+direction)%7; break;
     case Screen::Diagnostics:
         M5.Power.setLed(0); ledOn=false; diagnostic=(diagnostic+14+direction)%14; break;
+    case Screen::ActionConfirm:
+        if(favoriteCanDim()) adjustOption=!adjustOption;break;
+    case Screen::Light:
+        lightDraft.step(-1);break;
+    case Screen::LightConfirm:
+        backAction();return;
     case Screen::HomeAssistant:
         if(settings.favoriteCount) favorite=(favorite+settings.favoriteCount+direction)%settings.favoriteCount;
         lastHaRead=millis()-6000; break;
@@ -920,6 +1144,7 @@ void nextAction(int direction=1) {
 
 void startRecording(bool fromTouch) {
     if(notes.busy()) return;
+    if(screen==Screen::Light || screen==Screen::LightConfirm) changeScreen(Screen::HomeAssistant);
     badgeApp.abortUpload();
     if(screen==Screen::Badge) badgeApp.suspend();
     if(displayDimmed) { displayDimmed=false; M5.Display.setBrightness(settings.brightness); }
@@ -948,14 +1173,33 @@ void stopRecording() {
 void handleTouch(const ui::Gesture& gesture) {
     using ui::Action;
     using ui::GestureKind;
+    if(gesture.kind==GestureKind::HoldProgress) {
+        if(screen==Screen::HomeAssistant && !notes.busy() && !quickPanelOpen && !noticeTouch) { casaHoldProgress=gesture.progress;dirty=true; }
+        return;
+    }
+    if(gesture.kind!=GestureKind::None && casaHoldProgress) { casaHoldProgress=0;dirty=true; }
     if(gesture.kind==GestureKind::None) return;
     lastInteraction=millis();
     if(gesture.kind==GestureKind::QuickOpen) { showQuickPanel(true);return; }
     if(quickPanelOpen) {
         if(gesture.kind==GestureKind::QuickClose) showQuickPanel(false);
-        else if(gesture.kind==GestureKind::Tap) {
+        else if(gesture.kind==GestureKind::Left || gesture.kind==GestureKind::Right) {
+            quickPage=(quickPage+3+(gesture.kind==GestureKind::Left?1:-1))%3;quickPreview=-1;dirty=true;
+        } else if(quickPage>0 && (gesture.kind==GestureKind::Drag || gesture.kind==GestureKind::Release)) {
+            if(gesture.kind==GestureKind::Drag) {
+                quickPreview=ui::sliderValue(quickPage==1?0:1,gesture.x);
+                if(quickPage==1) M5.Display.setBrightness(quickPreview);
+            } else if(quickPreview>=0) {
+                if(quickPage==1) settings.brightness=quickPreview;else settings.volume=quickPreview;
+                quickPreview=-1;quietSavePending=true;quietSaveFailed=false;mqtt.changed();
+            }
+            dirty=true;
+        } else if(gesture.kind==GestureKind::Tap) {
             if(ui::quickClose.contains(gesture.x,gesture.y) && ui::quickClose.contains(gesture.originX,gesture.originY)) showQuickPanel(false);
-            else if(ui::quietToggle.contains(gesture.x,gesture.y) && ui::quietToggle.contains(gesture.originX,gesture.originY)) toggleQuiet();
+            else {
+                for(int i=0;i<3;++i) if(ui::Circle{151+i*82,176,25}.contains(gesture.x,gesture.y) && ui::Circle{151+i*82,176,25}.contains(gesture.originX,gesture.originY)) { quickPage=i;quickPreview=-1;dirty=true;return; }
+                if(quickPage==0 && ui::quietToggle.contains(gesture.x,gesture.y) && ui::quietToggle.contains(gesture.originX,gesture.originY)) toggleQuiet();
+            }
         }
         return;
     }
@@ -963,6 +1207,21 @@ void handleTouch(const ui::Gesture& gesture) {
         if(settingPreview>=0) { settingPreview=-1; applySettings(); }
         if(gesture.kind==GestureKind::Tap) { notice=""; dirty=true; }
         return;
+    }
+    if(gesture.kind==GestureKind::Hold) {
+        if(screen==Screen::HomeAssistant && !notes.busy() && favoriteCanDim()) { vibrate();openLight(); }
+        return;
+    }
+    if(screen==Screen::Home && (gesture.kind==GestureKind::Up || gesture.kind==GestureKind::Down)) {
+        homeMenu.apps=true;homeMenu.nextApp(gesture.kind==GestureKind::Up?1:-1);
+        transitionAt=millis();dirty=true;vibrate();sound(sfx::Cue::Select);return;
+    }
+    if(gesture.kind==GestureKind::Up || gesture.kind==GestureKind::Down) {
+        if(gesture.kind==GestureKind::Up && screen==Screen::HomeAssistant && !notes.busy()) openLight();
+        return;
+    }
+    if(screen==Screen::Light && !notes.busy() && (gesture.kind==GestureKind::Drag || gesture.kind==GestureKind::Release)) {
+        lightDraft.point(gesture.x,gesture.y);dirty=true;return;
     }
     if(gesture.kind==GestureKind::Drag || gesture.kind==GestureKind::Release) {
         if(screen!=Screen::Settings || notes.busy()) return;
@@ -974,17 +1233,18 @@ void handleTouch(const ui::Gesture& gesture) {
         } else if(settingPreview>=0) commitSetting(settingPreview);
         return;
     }
-    const auto target=ui::hit(screen,gesture.x,gesture.y,touchSelection(),notes.busy(),badgeControls(),clockControls());
-    const auto origin=ui::hit(screen,gesture.originX,gesture.originY,touchSelection(),notes.busy(),badgeControls(),clockControls());
+    const auto target=ui::hit(screen,gesture.x,gesture.y,touchSelection(),notes.busy(),badgeControls(),clockControls(),homeMenu,favoriteCanDim());
+    const auto origin=ui::hit(screen,gesture.originX,gesture.originY,touchSelection(),notes.busy(),badgeControls(),clockControls(),homeMenu,favoriteCanDim());
     if(screen==Screen::Diagnostics && diagnostic==1 && origin.action==Action::None) {
         touchX=gesture.x; touchY=gesture.y; dirty=true; return;
     }
     if(gesture.kind==GestureKind::Left || gesture.kind==GestureKind::Right) {
+        if(screen==Screen::Light || screen==Screen::LightConfirm) return;
         if(!notes.busy() && (screen==Screen::Clock || screen==Screen::Timer || screen==Screen::Stopwatch)) {
             const int page=screen==Screen::Clock?0:screen==Screen::Timer?1:2;
             clockPage((page+3+(gesture.kind==GestureKind::Left?1:-1))%3);vibrate();sound(sfx::Cue::Open);return;
         }
-        if(!notes.busy()) { vibrate(); nextAction(gesture.kind==GestureKind::Left?1:-1); }
+        if(!notes.busy()) { vibrate(); nextAction(gesture.kind==GestureKind::Left?1:-1,true); }
         return;
     }
     if(!(target==origin)) return;
@@ -996,8 +1256,8 @@ void handleTouch(const ui::Gesture& gesture) {
     vibrate();
     switch(target.action) {
     case Action::Back: backAction(); break;
-    case Action::Next: nextAction(); break;
-    case Action::Previous: nextAction(-1); break;
+    case Action::Next: nextAction(1,true); break;
+    case Action::Previous: nextAction(-1,true); break;
     case Action::Select:
     case Action::Play: selectAction(); break;
     case Action::Record: startRecording(true); break;
@@ -1014,9 +1274,11 @@ void handleTouch(const ui::Gesture& gesture) {
         }
         break;
     case Action::Secondary:
-        if(screen==Screen::Timer) timerSecondaryAction();else if(screen==Screen::Stopwatch) stopwatchSecondaryAction();
+        if(screen==Screen::Focus) { if(focusSession.reset()) { dirty=true;sound(sfx::Cue::Select); } }
+        else if(screen==Screen::Timer) timerSecondaryAction();else if(screen==Screen::Stopwatch) stopwatchSecondaryAction();
         break;
     case Action::Open:
+        if(target.index==99 && (screen==Screen::HomeAssistant || screen==Screen::ActionConfirm)) { openLight();break; }
         if(screen==Screen::Spotify) {
             musicMenu=0;changeScreen(Screen::MusicMenu);sound(sfx::Cue::Open);break;
         }
@@ -1039,11 +1301,12 @@ void handleTouch(const ui::Gesture& gesture) {
         if(screen==Screen::Badge) {
             if(target.index==1 && badgeApp.available()) {
                 Settings next=settings; next.badgeAutoRotate=!next.badgeAutoRotate;
-                if(next.save()) settings=next; else toast("Impostazioni Badge non salvate");
+                if(next.save()) settings=next; else toast(i18n::text("Impostazioni Badge non salvate"));
             }
             badgeControlsUntil=millis()+4000; dirty=true; break;
         }
-        if(screen==Screen::Home) selected=target.index;
+        if(screen==Screen::Home) homeMenu.nextApp(target.index);
+        else if(screen==Screen::SettingsMenu || screen==Screen::SettingsSection) setting=target.index;
         else if(screen==Screen::System) systemItem=target.index;
         else if(screen==Screen::Pairing) forgetOption=!companion.pairing() && target.index==1;
         selectAction(); break;
@@ -1072,7 +1335,7 @@ void showBootLoading(void* context) {
     while(!boot.ready.load(std::memory_order_acquire)) {
         if(firmware::showLoading(millis(),boot.startedAt,boot.ready.load(std::memory_order_acquire))) {
             canvas.fillScreen(ui::black);
-            ui::label(canvas,"Caricamento…",233,215,ui::Font::Label,ui::white);
+            ui::label(canvas,i18n::text("Caricamento…"),233,215,ui::Font::Label,ui::white);
             ui::label(canvas,String("v")+firmware::version,233,262,ui::Font::Body,ui::muted);
             canvas.pushSprite(0,0);
             break;
@@ -1085,6 +1348,7 @@ void showBootLoading(void* context) {
 }
 
 void setup() {
+    usbControl.begin();
     auto config = M5.config();
     config.output_power = false;
     config.fallback_board = m5::board_t::board_M5StopWatch;
@@ -1092,33 +1356,39 @@ void setup() {
     M5.begin(config);
     Serial.printf("[boot] hardware=%d heap_ok=%d\n", int(M5.getBoard()), heap_caps_check_integrity_all(true));
     if (M5.getBoard() != m5::board_t::board_M5StopWatch) {
-        Serial.println("Hardware diverso da M5Stack StopWatch: avvio interrotto.");
+        Serial.println(i18n::text("Hardware diverso da M5Stack StopWatch: avvio interrotto."));
         for (;;) delay(1000);
     }
     settingsOk = settings.load();
+    applyRegion(settings);
     clockTimer.setSeconds(settings.timerSeconds);
+    homeMenu.configure(settings.homeApps,settings.homeAppCount);
     applySettings();
     M5.Power.setVibration(0);
+    // The default 2 kHz PWM is audible; preserve duty and move the carrier above hearing.
+    auto& motorController=static_cast<m5::M5IOE1_Class&>(M5.getIOExpander(0));
+    if(!motorController.setPwmFrequency(24000)) Serial.println("[haptics] frequenza silenziosa non impostata");
     M5.Power.setLed(0);
     memoryOk = checkMemory();
     canvas.setColorDepth(16);
     canvas.setPsram(true);
     if (!canvas.createSprite(466, 466)) {
         M5.Display.setTextColor(0xffffff, 0x000000);
-        M5.Display.drawString("PSRAM: impossibile avviare UI", 50, 233);
+        M5.Display.drawString(i18n::text("PSRAM: impossibile avviare UI"), 50, 233);
         for (;;) delay(1000);
     }
-    if(!ui::beginFonts()) toast("Caratteri UI non disponibili");
+    if(!ui::beginFonts()) toast(i18n::text("Caratteri UI non disponibili"));
     BootIndicator boot;
     // Setup leaves the canvas to this task until it has acknowledged completion.
     const bool bootIndicatorStarted=xTaskCreate(showBootLoading,"boot-display",4096,&boot,1,nullptr)==pdPASS;
     notes.begin();
+    security_key::begin();
     if(notes.ready()) badgeApp.begin();
     if(notes.ready()) sfx::begin(settings.soundPack);
     Serial.printf("[boot] display pronto, archivio=%d heap_ok=%d\n", notes.ready(), heap_caps_check_integrity_all(true));
     setenv("TZ", "UTC0", 1); tzset();
     if (M5.Rtc.isEnabled() && !M5.Rtc.getVoltLow()) M5.Rtc.setSystemTimeFromRtc();
-    setenv("TZ", timezoneRome, 1); tzset();
+    applyRegion(settings);
     Serial.printf("[boot] RTC pronto, heap_ok=%d\n", heap_caps_check_integrity_all(true));
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
@@ -1129,13 +1399,13 @@ void setup() {
     Serial.println("[boot] rete inizializzata");
     homeReady = home.begin();
     Serial.println("[boot] task Home Assistant pronto");
-    if (!companion.begin()) toast("Avvio companion BLE fallito");
+    if (!companion.begin()) toast(i18n::text("Avvio companion BLE fallito"));
     mqtt.setRelay(&companion);mqtt.begin();
     if (settings.ssid.isEmpty()) changeScreen(Screen::Pairing);
     Serial.println("[boot] companion pronto");
-    if (!settingsOk) toast("Configurazione illeggibile: valori predefiniti");
-    else if (!notes.ready()) toast("Archivio da inizializzare in Diagnostica");
-    else if(!sfx::ready() && settings.soundPack) toast("Pacchetti audio da installare via USB");
+    if (!settingsOk) toast(i18n::text("Configurazione illeggibile: valori predefiniti"));
+    else if (!notes.ready()) toast(i18n::text("Archivio da inizializzare in Diagnostica"));
+    else if(!sfx::ready() && settings.soundPack) toast(i18n::text("Pacchetti audio da installare via USB"));
     notes.warmMicrophone();
     boot.ready.store(true,std::memory_order_release);
     if(bootIndicatorStarted) while(!boot.stopped.load(std::memory_order_acquire)) delay(1);
@@ -1152,9 +1422,18 @@ void loop() {
         // A press begun before expiry must not restart or dismiss the new alert.
         controls.suppressTapUntilReleased();touchInput.suppressUntilReleased();
     }
+    presentationTime.update(now);
+    focusSession.update(now);
+    const unsigned focusAlert=focusSession.alert(now,notes.busy() || notes.playing() || security_key::awaiting());
+    if(focusAlert==1) {
+        if(screenOff) { screenOff=false;displayDimmed=false;M5.Display.setBrightness(settings.brightness);lastInteraction=now; }
+        toast(focusSession.phase()==clockwork::Focus::Phase::Work?i18n::text("Focus completato"):i18n::text("Pausa terminata"));
+        vibrate(180);sound(sfx::Cue::Complete,true);
+    }
     const bool stopwatchWasRunning=chronometer.running();chronometer.update(now);
     if(stopwatchWasRunning && !chronometer.running() && screen==Screen::Stopwatch) dirty=true;
     sfx::update();
+    if(usbControl.update(((screen==Screen::UsbControl && !usbPaused) || screen==Screen::Slides) && !quickPanelOpen && !notes.busy(),companion.connected(),now,screen==Screen::Slides)) dirty=true;
     if (M5.BtnA.wasPressed()) ++pressesA;
     if (M5.BtnB.wasPressed()) ++pressesB;
     const auto touch=M5.Touch.getDetail();
@@ -1176,17 +1455,30 @@ void loop() {
             dirty=true;
         }
     }
-    const auto events=controls.update(now,M5.BtnA.isPressed(),M5.BtnB.isPressed());
+    if(security_key::update(screen==Screen::SecurityKey && !quickPanelOpen && !notes.busy() && !screenOff,M5.BtnA.isPressed(),M5.BtnB.isPressed())) dirty=true;
+    auto events=controls.update(now,M5.BtnA.isPressed(),M5.BtnB.isPressed());
+    if(screen==Screen::SecurityKey && !quickPanelOpen) {
+        // Only the physical presence gate consumes B; never start recording or confirm through touch/BLE.
+        events.next=events.select=events.recordStart=events.recordStop=false;
+    }
     if(notes.busy() || events.recordStop || events.next || events.select || events.home || events.back) lastInteraction=now;
     if(events.next || events.select || events.back || events.home || events.recordStart) {
         touchInput.suppressUntilReleased();
+        if(quickPreview>=0) { quickPreview=-1;applySettings(); }
         if(settingPreview>=0) { settingPreview=-1; applySettings(); }
     }
     if(events.recordStop) stopRecording();
     const bool panelButtons=quickPanelOpen;
     if(panelButtons) {
         if(events.next || events.back) showQuickPanel(false);
-        else if(events.select) toggleQuiet();
+        else if(events.select) {
+            if(quickPage==0) toggleQuiet();
+            else {
+                if(quickPage==1) settings.brightness=settings.brightness>=240?32:std::min(255,int(settings.brightness)+32);
+                else settings.volume=settings.volume>=200?0:std::min(200,int(settings.volume)+20);
+                quietSavePending=true;quietSaveFailed=false;applySettings();mqtt.changed();dirty=true;
+            }
+        }
     } else {
         if(events.next) mqtt.button("a","press");
         if(events.select) mqtt.button("b","press");
@@ -1196,9 +1488,12 @@ void loop() {
     if(events.recordStop) mqtt.button("b","release");
     if(events.home || events.recordStart) { if(quickPanelOpen) showQuickPanel(false); }
     if(events.home || (!panelButtons && events.back)) {
+        if(events.home) homeMenu.apps=false;
         stopRecording();
         if(!notes.busy()) {
             if(events.home) changeScreen(Screen::Home);
+            else if((screen==Screen::HomeAssistant || screen==Screen::ActionConfirm) && favoriteCanDim()) openLight();
+            else if(screen==Screen::Light && lightDraft.value!=lightDraft.initial) changeScreen(Screen::LightConfirm);
             else backAction();
         } else homeAfterNote=true;
     }
@@ -1212,13 +1507,16 @@ void loop() {
     }
     if(M5.Touch.getCount()>1) {
         touchInput.suppressUntilReleased();
+        if(quickPreview>=0) { quickPreview=-1;applySettings(); }
         if(settingPreview>=0) { settingPreview=-1; applySettings(); }
     }
     if(!screenOff) {
-        const bool slider=!quickPanelOpen && screen==Screen::Settings && !notes.busy() &&
-            !noticeTouch &&
-            ui::hit(screen,touch.x,touch.y,touchSelection()).action==ui::Action::Slider;
-        handleTouch(touchInput.update(now,touch.isPressed(),touch.x,touch.y,slider,quickPanelOpen));
+        const bool slider=!notes.busy() && !noticeTouch &&
+            ((quickPanelOpen && quickPage>0 && ui::Rect{84,310,298,66}.contains(touch.x,touch.y)) ||
+             (!quickPanelOpen && (screen==Screen::Settings || screen==Screen::Light) && ui::hit(screen,touch.x,touch.y,touchSelection()).action==ui::Action::Slider));
+        const bool hold=!quickPanelOpen && !noticeTouch && !notes.busy() && screen==Screen::HomeAssistant && favoriteCanDim() && ui::casaCard.contains(touch.x,touch.y);
+        handleTouch(touchInput.update(now,touch.isPressed(),touch.x,touch.y,slider,quickPanelOpen,hold));
+        if(casaHoldProgress && (!touch.isPressed() || !hold)) { casaHoldProgress=0;dirty=true; }
         if(!touch.isPressed()) noticeTouch=false;
         if(!quickPanelOpen && screen==Screen::Diagnostics && diagnostic==1 && touch.isPressed()) {
             touchX=touch.x;touchY=touch.y;dirty=true;
@@ -1258,11 +1556,11 @@ void loop() {
     const int homeRoute=settings.favoritesMqtt?(mqtt.connected()?1:mqtt.available()?2:0):(connected?1:0);
     const bool homeOnline=homeRoute!=0;
     if(homeRoute!=wasHomeRoute) {
-        states.fill(""); units.fill(""); stateUpdated.fill(0);
+        stateUpdated.fill(0);
         stateResetAt=now; lastHaRead=now-6000; dirty=true;
         wasHomeRoute=homeRoute;
     }
-    if (connected && !wasConnected) configTzTime(timezoneRome, "pool.ntp.org", "time.cloudflare.com");
+    if (connected && !wasConnected) configTzTime(regional::rule(settings.timeZone.c_str()), "pool.ntp.org", "time.cloudflare.com");
     if(wasConnected!=connected) dirty=true;
     wasConnected = connected;
     HomeResult result;
@@ -1270,13 +1568,17 @@ void loop() {
         if (homeOnline && result.favorite < settings.favoriteCount && result.viaMqtt==settings.favoritesMqtt &&
             result.entity==settings.favorites[result.favorite].entity && int32_t(result.requestedAt-stateResetAt)>=0) {
             const bool verifying=homeCommand.pending(result.favorite);
-            states[result.favorite] = result.state;
-            units[result.favorite] = result.unit;
+            if(result.success && policy::usableState(result.entity.c_str(),result.state.c_str())) {
+                states[result.favorite] = result.state;
+                units[result.favorite] = result.unit;
+            }
+            lightCapable[result.favorite]=result.success && result.dimmable;
+            lightLevels[result.favorite]=result.brightness;
             stateUpdated[result.favorite] = result.success && policy::usableState(result.entity.c_str(),result.state.c_str())?now:0;
-            const bool confirmed=result.success && homeCommand.observe(result.favorite,result.state.c_str());
+            const bool confirmed=result.success && homeCommand.observe(result.favorite,result.state.c_str(),result.brightness);
             lastHaRead=(result.favorite==favorite || homeCommand.pending())?now:now-6000;
             if(confirmed) {
-                toast("Stato confermato"); vibrate(100); sound(sfx::Cue::Success,true);
+                toast(i18n::text("Stato confermato")); vibrate(100); sound(sfx::Cue::Success,true);
             } else if(result.action || (!result.success && !verifying)) toast(result.message);
             if(result.action && !verifying) {
                 vibrate(result.success ? 100 : 250);
@@ -1287,9 +1589,9 @@ void loop() {
     }
     if(homeCommand.expired(now)) {
         stateUpdated[homeCommand.favorite()]=0; homeCommand.clear();
-        toast("Stato non confermato: verifica in Home Assistant");
+        toast(i18n::text("Stato non confermato: verifica in Home Assistant"));
     }
-    const bool homeVisible=!quickPanelOpen && !screenOff && screen==Screen::HomeAssistant;
+    const bool homeVisible=!quickPanelOpen && !screenOff && (screen==Screen::HomeAssistant || screen==Screen::ActionConfirm || screen==Screen::Light || screen==Screen::LightConfirm);
     const bool musicScreen=screen==Screen::Spotify || screen==Screen::MusicSources || screen==Screen::MusicMenu || screen==Screen::MusicPlaylists;
     const bool musicActive=!screenOff && !notes.busy() && musicScreen;
     const bool musicVisible=!quickPanelOpen && musicActive;
@@ -1323,6 +1625,7 @@ void loop() {
             if(level!=batteryLevel) dirty=true;
             batteryLevel=level;batteryMv=M5.Power.getBatteryVoltage();lastBatteryRead=now;
         }
+        updateCharging(now);
         if(!screenOff && !quickPanelOpen && screen==Screen::Diagnostics && diagnostic==6 && M5.Imu.isEnabled() && M5.Imu.update()) imu=M5.Imu.getImuData();
         if (connected && time(nullptr) >= 1704067200 && uint32_t(now - lastRtcSync) > 60000) {
             const time_t epoch = time(nullptr);
@@ -1334,7 +1637,8 @@ void loop() {
         static bool relayReady=false;
         static size_t noteCount=0;
         const time_t minute=time(nullptr)/60;
-        if(screen==Screen::Home && (homeMinute!=minute || relayReady!=companion.relayReady())) dirty=true;
+        if((screen==Screen::Home || screen==Screen::System || screen==Screen::SettingsMenu || screen==Screen::SettingsSection || screen==Screen::Settings) &&
+            (homeMinute!=minute || relayReady!=companion.relayReady())) dirty=true;
         homeMinute=minute;relayReady=companion.relayReady();
         if(!quickPanelOpen && screen==Screen::Notes) {
             const size_t count=notes.count();
@@ -1343,18 +1647,19 @@ void loop() {
         }
         if(!quickPanelOpen && (screen==Screen::HomeAssistant || screen==Screen::Diagnostics || screen==Screen::Pairing || screen==Screen::Companion)) dirty=true;
     }
-    if(noticeDisplayed && uint32_t(now-noticeAt)>=4500) dirty=true;
+    if(noticeDisplayed && uint32_t(now-noticeAt)>=noticeDuration) dirty=true;
     if(badgeApp.update(now,settings.badgeAutoRotate,settings.badgeAnimate,!quickPanelOpen && screen==Screen::Badge && !screenOff && !notes.busy())) dirty=true;
     if(!quickPanelOpen && screen==Screen::Clock) {
         if(time(nullptr)!=clockDrawnSecond) dirty=true;
         if(clockControlsUntil && int32_t(now-clockControlsUntil)>=0) { clockControlsUntil=0;dirty=true; }
     }
+    if(!quickPanelOpen && (screen==Screen::Focus || screen==Screen::Slides) && uint32_t(now-lastDraw)>=1000) dirty=true;
     if(!quickPanelOpen && ((screen==Screen::Timer && clockTimer.state()==clockwork::Timer::State::Running && uint32_t(now-lastDraw)>=100) ||
        (screen==Screen::Stopwatch && chronometer.running() && uint32_t(now-lastDraw)>=50))) dirty=true;
     if(screen==Screen::Badge) {
         if(badgeControlsUntil && int32_t(now-badgeControlsUntil)>=0) { badgeControlsUntil=0; dirty=true; }
     }
-    const bool keepDisplayOn=(screen==Screen::Clock && settings.clockKeepAwake) ||
+    const bool keepDisplayOn=(screen==Screen::Slides && usbControl.connected()) || (screen==Screen::SecurityKey && security_key::connected()) || security_key::awaiting() || (screen==Screen::Clock && settings.clockKeepAwake) ||
         (screen==Screen::Badge && badgeApp.available() && settings.badgeKeepAwake);
     const bool dim=keepDisplayOn && !quickPanelOpen && !notes.busy() && uint32_t(now-lastInteraction)>20000 &&
         (screen!=Screen::Badge || uint32_t(now-badgeApp.lastMotion())>20000);
@@ -1367,19 +1672,20 @@ void loop() {
         screenOff = true;
     }
     if (!notes.busy() && !M5.Speaker.isPlaying() && !screenOff) {
-        if(screen==Screen::Badge || screen==Screen::Clock || musicScreen || badgeApp.uploading()) { if(M5.Mic.isRunning()) M5.Mic.end(); }
+        if(screen==Screen::Badge || screen==Screen::Clock || screen==Screen::Focus || screen==Screen::Slides || screen==Screen::SecurityKey || musicScreen || badgeApp.uploading()) { if(M5.Mic.isRunning()) M5.Mic.end(); }
         else notes.warmMicrophone();
     }
     if(quietSavePending && canSave()) {
         quietSaveFailed=!settings.save();quietSavePending=false;dirty=true;
     }
-    const bool animating=screen==Screen::Home && uint32_t(now-transitionAt)<160;
+    const bool animating=screen==Screen::Home && (uint32_t(now-transitionAt)<180 || homeFramePending);
     if(!screenOff && (dirty || (!quickPanelOpen && (notes.busy() || animating))) && uint32_t(now-lastDraw)>=(notes.busy()?50u:screen==Screen::Badge?40u:33u)) {
         // A periodic clock frame must not extend the two-second interaction boost.
         updateCpu(now,cpuWorkPending(),true);
         draw();
     }
     portal.update();
+    if(usbControl.update(((screen==Screen::UsbControl && !usbPaused) || screen==Screen::Slides) && !quickPanelOpen && !notes.busy(),companion.connected(),millis(),screen==Screen::Slides)) dirty=true;
     companion.update();
     mqtt.update(screenOff);
     updateCpu(millis(),cpuWorkPending());

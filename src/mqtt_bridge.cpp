@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "mqtt_bridge.h"
 #include "firmware.h"
 #include "companion.h"
@@ -84,20 +85,20 @@ void MqttBridge::event(void* context, esp_event_base_t, int32_t id, void* data) 
 void MqttBridge::discovery() {
     struct Entity { const char* domain; const char* key; const char* name; const char* icon; const char* deviceClass; const char* unit; int minimum, maximum; };
     const Entity entities[] = {
-        {"sensor", "battery", "Batteria", "mdi:battery", "battery", "%", 0, 0},
-        {"sensor", "rssi", "Segnale Wi-Fi", "mdi:wifi", "signal_strength", "dBm", 0, 0},
-        {"sensor", "notes", "Note vocali", "mdi:microphone", "", "", 0, 0},
-        {"binary_sensor", "charging", "In carica", "mdi:power-plug", "battery_charging", "", 0, 0},
-        {"binary_sensor", "recording", "Registrazione", "mdi:record-circle", "", "", 0, 0},
-        {"number", "brightness", "Luminosita", "mdi:brightness-6", "", "", 16, 255},
-        {"number", "volume", "Volume interazioni", "mdi:volume-high", "", "", 0, 200},
-        {"number", "note_volume", "Volume note vocali", "mdi:account-voice", "", "", 0, 200},
-        {"number", "vibration", "Vibrazione", "mdi:vibrate", "", "", 0, 255},
-        {"number", "screen_timeout", "Timeout display", "mdi:timer-outline", "", "s", 15, 300},
-        {"button", "vibrate", "Trova StopWatch", "mdi:vibrate", "", "", 0, 0},
-        {"button", "beep", "Suona", "mdi:volume-high", "", "", 0, 0},
-        {"event", "a", "Pulsante A", "mdi:gesture-tap-button", "", "", 0, 0},
-        {"event", "b", "Pulsante B", "mdi:gesture-tap-button", "", "", 0, 0},
+        {"sensor", "battery", i18n::text("Batteria"), "mdi:battery", "battery", "%", 0, 0},
+        {"sensor", "rssi", i18n::text("Segnale Wi-Fi"), "mdi:wifi", "signal_strength", "dBm", 0, 0},
+        {"sensor", "notes", i18n::text("Note vocali"), "mdi:microphone", "", "", 0, 0},
+        {"binary_sensor", "charging", i18n::text("In carica"), "mdi:power-plug", "battery_charging", "", 0, 0},
+        {"binary_sensor", "recording", i18n::text("Registrazione"), "mdi:record-circle", "", "", 0, 0},
+        {"number", "brightness", i18n::text("Luminosita"), "mdi:brightness-6", "", "", 16, 255},
+        {"number", "volume", i18n::text("Volume interazioni"), "mdi:volume-high", "", "", 0, 200},
+        {"number", "note_volume", i18n::text("Volume note vocali"), "mdi:account-voice", "", "", 0, 200},
+        {"number", "vibration", i18n::text("Vibrazione"), "mdi:vibrate", "", "", 0, 255},
+        {"number", "screen_timeout", i18n::text("Timeout display"), "mdi:timer-outline", "", "s", 15, 300},
+        {"button", "vibrate", i18n::text("Trova StopWatch"), "mdi:vibrate", "", "", 0, 0},
+        {"button", "beep", i18n::text("Suona"), "mdi:volume-high", "", "", 0, 0},
+        {"event", "a", i18n::text("Pulsante A"), "mdi:gesture-tap-button", "", "", 0, 0},
+        {"event", "b", i18n::text("Pulsante B"), "mdi:gesture-tap-button", "", "", 0, 0},
     };
     for (const auto& entity : entities) {
         JsonDocument config;
@@ -109,7 +110,7 @@ void MqttBridge::discovery() {
         device["identifiers"].to<JsonArray>().add(id_);
         device["name"] = "StopWatch";
         device["manufacturer"] = "M5Stack";
-        device["model"] = "StopWatch C152 · firmware personale";
+        device["model"] = "StopWatch C152";
         device["sw_version"] = firmware::version;
         const String domain = entity.domain;
         if (domain != "button") {
@@ -162,13 +163,15 @@ void MqttBridge::publishState() {
     if (publish(base_ + "/state", body)) { stateDirty_ = false; lastState_ = millis(); }
 }
 
-bool MqttBridge::requestFavorite(size_t favorite, bool action) {
+bool MqttBridge::requestFavorite(size_t favorite, bool action,int brightness) {
     if (!available() || busy() || favorite >= settings_.favoriteCount ||
         (action && time(nullptr) < 1704067200)) return false;
+    if(brightness< -1 || brightness>100 || (brightness>=0 && (!action || !settings_.favorites[favorite].entity.startsWith("light.")))) return false;
     JsonDocument request;
     request["request"] = ++favoriteRequest_;
     request["entity"] = settings_.favorites[favorite].entity;
     request["action"] = action;
+    if(brightness>=0) request["brightness"]=brightness;
     request["sent_at"] = int64_t(time(nullptr));
     String body;
     serializeJson(request, body);
@@ -189,7 +192,7 @@ bool MqttBridge::pollFavorite(HomeResult& result) {
     if (favoritePending_ && uint32_t(millis() - favoriteAt_) > (favoriteViaRelay_?phone::timeoutMs:8000)) {
         favoritePending_ = false;
         favoriteReady_ = true;
-        favoriteResult_.message = favoriteResult_.action ? "Esito incerto: verifica in Home Assistant" : favoriteViaRelay_?"Home Assistant non risponde via iPhone":"Home Assistant non risponde via MQTT";
+        favoriteResult_.message = favoriteResult_.action ? i18n::text("Esito incerto: verifica in Home Assistant") : favoriteViaRelay_?i18n::text("Home Assistant non risponde via iPhone"):i18n::text("Home Assistant non risponde via MQTT");
     }
     if (!favoriteReady_) return false;
     result = favoriteResult_;
@@ -231,11 +234,11 @@ bool MqttBridge::requestMusic(music::Command command,const String& value,uint32_
 
 bool MqttBridge::pollMusic() {
     if(!available() && (playback_.available || musicPending_)) {
-        playback_.available=false;musicPending_=false;musicMessage_="Wi-Fi o iPhone non disponibili";musicDirty_=true;
+        playback_.available=false;musicPending_=false;musicMessage_=i18n::text("Wi-Fi o iPhone non disponibili");musicDirty_=true;
     } else if(musicPending_ && uint32_t(millis()-musicAt_)>(musicViaRelay_?phone::timeoutMs:8000)) {
         musicPending_=false;
         if(musicCommand_!=music::Command::Playlists) playback_.available=false;
-        musicMessage_="Spotify non risponde · verifica HA";musicDirty_=true;
+        musicMessage_=i18n::text("Spotify non risponde · verifica HA");musicDirty_=true;
     }
     const bool dirty=musicDirty_;musicDirty_=false;return dirty;
 }
@@ -316,7 +319,7 @@ void MqttBridge::update(bool screenOff) {
                 music::parse(reply["playback"].as<JsonObjectConst>(),playback_,millis()))) continue;
             if(!reply["success"].as<bool>()) {
                 if(!catalog) playback_.available=false;
-                musicMessage_=message->relay && reply["error"].is<const char*>()?reply["error"].as<String>().substring(0,160):catalog?"Playlist non disponibili":"Spotify non disponibile in HA";
+                musicMessage_=message->relay && reply["error"].is<const char*>()?reply["error"].as<String>().substring(0,160):catalog?i18n::text("Playlist non disponibili"):i18n::text("Spotify non disponibile in HA");
             }
             else musicMessage_="";
             musicPending_=false;musicDirty_=true;continue;
@@ -327,6 +330,10 @@ void MqttBridge::update(bool screenOff) {
             reply["entity"].as<String>() != favoriteResult_.entity ||
             favoriteResult_.entity != settings_.favorites[favoriteResult_.favorite].entity ||
             !reply["success"].is<bool>() || !reply["state"].is<const char*>()) continue;
+        if(!reply["dimmable"].isUnbound() && !reply["dimmable"].is<bool>()) continue;
+        if(!reply["brightness"].isUnbound() && (!reply["brightness"].is<int>() || reply["brightness"].as<int>()< -1 || reply["brightness"].as<int>()>100)) continue;
+        favoriteResult_.dimmable=favoriteResult_.entity.startsWith("light.") && (reply["dimmable"] | false);
+        favoriteResult_.brightness=favoriteResult_.dimmable?(reply["brightness"] | -1):-1;
         favoriteResult_.success = reply["success"].as<bool>();
         const String state = reply["state"].as<String>();
         const String unit = reply["unit"] | "";
@@ -334,7 +341,7 @@ void MqttBridge::update(bool screenOff) {
         favoriteResult_.state = String(prefix.data(), prefix.size());
         prefix = policy::utf8Prefix(unit.c_str(), 16);
         favoriteResult_.unit = String(prefix.data(), prefix.size());
-        favoriteResult_.message = favoriteResult_.success ? (favoriteResult_.action ? "Comando inviato" : "Stato aggiornato") : "Entita non disponibile";
+        favoriteResult_.message = favoriteResult_.success ? (favoriteResult_.action ? i18n::text("Comando inviato") : i18n::text("Stato aggiornato")) : i18n::text("Entita non disponibile");
         if(!favoriteResult_.success && message->relay && reply["error"].is<const char*>()) favoriteResult_.message=reply["error"].as<String>().substring(0,160);
         favoritePending_ = false;
         favoriteReady_ = true;

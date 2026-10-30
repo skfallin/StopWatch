@@ -1,0 +1,3 @@
+"NSBluetoothAlwaysUsageDescription" = "Collega il tuo StopWatch per gestire impostazioni, casa e note vocali.";
+"NSSpeechRecognitionUsageDescription" = "Trasforma in testo le note registrate sul tuo StopWatch. La trascrizione avviene su questo iPhone.";
+"NSLocalNetworkUsageDescription" = "Invia immagini e GIF al Badge e ricevi le note vocali dal tuo StopWatch tramite la rete Wi-Fi locale.";

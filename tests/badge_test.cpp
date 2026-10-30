@@ -71,10 +71,9 @@ int main(int argc,char** argv) {
     orientation.reset();orientation.update(0.999848f,-0.0174524f,0,0,1);
     const float start=orientation.angle();orientation.update(0.999848f,0.0174524f,0,0,0.025f);
     assert(std::abs(badge::wrap(orientation.angle()-start))<2);
-    for(int selected=0;selected<ui::homeCount;++selected) {
-        assert((ui::hit(ui::Screen::Home,233,233,selected)==ui::Target{ui::Action::Open,selected}));
-        assert((ui::hit(ui::Screen::Home,346,351,selected)==ui::Target{ui::Action::Open,(selected+ui::homeCount-1)%ui::homeCount}));
-    }
+    ui::HomeMenu menu;menu.selected=1;
+    assert(menu.app()==2);
+    assert((ui::hit(ui::Screen::Home,233,188,0,false,false,false,menu)==ui::Target{ui::Action::Open,0}));
     assert(ui::hit(ui::Screen::Badge,112,84,0,false,false).action==ui::Action::Open);
     assert(ui::hit(ui::Screen::Badge,112,84,0,false,true).action==ui::Action::Back);
     assert(ui::hit(ui::Screen::Badge,233,389,0,false,true).action==ui::Action::Select);

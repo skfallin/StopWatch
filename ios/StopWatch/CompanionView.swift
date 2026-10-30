@@ -25,19 +25,19 @@ struct CompanionView: View {
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("STOPWATCH").font(.caption.weight(.semibold)).tracking(3).foregroundStyle(.white.opacity(0.65))
-                            Text(tab == 0 ? "A portata\ndi mano." : tab == 1 ? "Un'idea.\nÈ già qui." : tab == 2 ? "La tua casa,\ncon te." : "Il tuo stile.\nIn vista.")
+                            Text(tab == 0 ? String(localized: "A portata\ndi mano.", bundle: AppLocalization.bundle) : tab == 1 ? String(localized: "Un'idea.\nÈ già qui.", bundle: AppLocalization.bundle) : tab == 2 ? String(localized: "La tua casa,\ncon te.", bundle: AppLocalization.bundle) : tab == 3 ? String(localized: "Il tuo stile.\nIn vista.", bundle: AppLocalization.bundle) : String(localized: "Un gesto.\nÈ sul computer.", bundle: AppLocalization.bundle))
                                 .font(.system(size: headline, weight: .medium, design: .rounded)).tracking(-1.5)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 8)
-                        CircleButton(symbol: "slider.horizontal.3", label: "Impostazioni") { settings = true }
+                        CircleButton(symbol: "slider.horizontal.3", label: String(localized: "Impostazioni", bundle: AppLocalization.bundle)) { settings = true }
                     }
                     HStack(spacing: 8) {
                         Image(systemName: connection.ready ? "link" : "link.badge.plus")
                             .foregroundStyle(connection.ready ? Palette.orange : .white.opacity(0.7))
                         Text("Bluetooth · " + connection.phase.title).font(.subheadline)
                         Spacer()
-                        if connection.preview { Text("ANTEPRIMA").font(.caption2).foregroundStyle(.white.opacity(0.6)) }
+                        if connection.preview { Text(String(localized: "ANTEPRIMA", bundle: AppLocalization.bundle)).font(.caption2).foregroundStyle(.white.opacity(0.6)) }
                     }
                     .foregroundStyle(.white.opacity(0.85))
                     if let error = connection.error {
@@ -46,14 +46,15 @@ struct CompanionView: View {
                             Text(error).font(.subheadline)
                             Spacer(minLength: 0)
                             Button { connection.error = nil } label: { Image(systemName: "xmark").frame(width: 32, height: 44) }
-                                .accessibilityLabel("Chiudi messaggio")
+                                .accessibilityLabel(String(localized: "Chiudi messaggio", bundle: AppLocalization.bundle))
                         }
                         .padding(18).background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 24))
                     }
                     if tab == 0 { devicePage }
                     else if tab == 1 { NotesPage() }
                     else if tab == 2 { homePage }
-                    else { BadgePage() }
+                    else if tab == 3 { BadgePage() }
+                    else { USBControlPage() }
                 }
                 .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 20)
                 .frame(maxWidth: 640)
@@ -63,17 +64,18 @@ struct CompanionView: View {
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 HStack(spacing: 0) {
-                    CircleButton(symbol: "antenna.radiowaves.left.and.right", label: "Collega StopWatch", diameter: 44) { pairing = true }
+                    CircleButton(symbol: "antenna.radiowaves.left.and.right", label: String(localized: "Collega StopWatch", bundle: AppLocalization.bundle), diameter: 44) { pairing = true }
                     Spacer(minLength: 4)
                     HStack(spacing: 2) {
-                        tabButton(0, "stopwatch", "Dispositivo")
-                        tabButton(1, "waveform", "Note vocali")
-                        tabButton(2, "house", "Casa")
+                        tabButton(0, "stopwatch", String(localized: "Dispositivo", bundle: AppLocalization.bundle))
+                        tabButton(1, "waveform", String(localized: "Note vocali", bundle: AppLocalization.bundle))
+                        tabButton(2, "house", String(localized: "Casa", bundle: AppLocalization.bundle))
                         tabButton(3, "photo", "Badge")
+                        tabButton(4, "computermouse", String(localized: "Controllo USB", bundle: AppLocalization.bundle))
                     }
                     .padding(5).background(Color(white: 0.17), in: Capsule())
                     Spacer(minLength: 4)
-                    CircleButton(symbol: "heart.text.square", label: "Diagnostica hardware", diameter: 44) { diagnostics = true }
+                    CircleButton(symbol: "heart.text.square", label: String(localized: "Diagnostica hardware", bundle: AppLocalization.bundle), diameter: 44) { diagnostics = true }
                 }
                 .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)
                 .background(Palette.background)
@@ -85,7 +87,7 @@ struct CompanionView: View {
                 NavigationStack {
                     if let configuration = connection.configuration {
                         ConfigurationEditor(part: .mqtt, configuration: configuration)
-                            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Annulla") { mqttSettings = false } } }
+                            .toolbar { ToolbarItem(placement: .topBarLeading) { Button(String(localized: "Annulla", bundle: AppLocalization.bundle)) { mqttSettings = false } } }
                     }
                 }
                 .preferredColorScheme(.light).tint(.primary)
@@ -111,7 +113,7 @@ struct CompanionView: View {
             PaperCard {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("IL TUO DISPOSITIVO").font(.caption.weight(.medium)).tracking(1.4).foregroundStyle(Palette.secondary)
+                        Text(String(localized: "IL TUO DISPOSITIVO", bundle: AppLocalization.bundle)).font(.caption.weight(.medium)).tracking(1.4).foregroundStyle(Palette.secondary)
                         Text("StopWatch").font(.title.weight(.medium))
                     }
                     Spacer()
@@ -127,12 +129,12 @@ struct CompanionView: View {
                         Text("Bluetooth").font(.subheadline.weight(.medium))
                     }
                 } else {
-                    Text("Un codice, una volta sola.")
+                    Text(String(localized: "Un codice, una volta sola.", bundle: AppLocalization.bundle))
                         .font(.title3.weight(.medium))
-                    Text("Abbina il dispositivo e ritrova qui impostazioni, comandi e registrazioni.")
+                    Text(String(localized: "Abbina il dispositivo e ritrova qui impostazioni, comandi e registrazioni.", bundle: AppLocalization.bundle))
                         .font(.subheadline).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
                     Button { pairing = true } label: {
-                        HStack { Text(connection.hasRememberedDevice ? "Ricollega StopWatch" : "Abbina StopWatch"); Spacer(); Image(systemName: "arrow.up.right") }
+                        HStack { Text(connection.hasRememberedDevice ? String(localized: "Ricollega StopWatch", bundle: AppLocalization.bundle) : String(localized: "Abbina StopWatch", bundle: AppLocalization.bundle)); Spacer(); Image(systemName: "arrow.up.right") }
                             .font(.headline).padding(.vertical, 15).padding(.horizontal, 20)
                             .foregroundStyle(.white).background(Palette.ink, in: Capsule())
                     }
@@ -141,23 +143,23 @@ struct CompanionView: View {
                 }
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                MetricCard(title: "Batteria", value: batteryText, detail: connection.status?.charging == true ? "In carica" : "Sul dispositivo", symbol: "battery.75percent")
+                MetricCard(title: String(localized: "Batteria", bundle: AppLocalization.bundle), value: batteryText, detail: connection.status?.charging == true ? String(localized: "In carica", bundle: AppLocalization.bundle) : String(localized: "Sul dispositivo", bundle: AppLocalization.bundle), symbol: "battery.75percent")
                 Button { tab = 1 } label: {
-                    MetricCard(title: "Note vocali", value: connection.status.map { String($0.notes) } ?? "—", detail: "Idee da riascoltare", symbol: "waveform")
+                    MetricCard(title: String(localized: "Note vocali", bundle: AppLocalization.bundle), value: connection.status.map { String($0.notes) } ?? "—", detail: String(localized: "Idee da riascoltare", bundle: AppLocalization.bundle), symbol: "waveform")
                 }.buttonStyle(.plain)
             }
             PaperCard {
-                Text("Fatti sentire.").font(.title2.weight(.medium))
+                Text(String(localized: "Fatti sentire.", bundle: AppLocalization.bundle)).font(.title2.weight(.medium))
                 HStack(spacing: 12) {
-                    OutputButton(symbol: "waveform.path", title: "Vibra", action: "vibrate")
-                    OutputButton(symbol: "speaker.wave.2", title: "Suona", action: "beep")
+                    OutputButton(symbol: "waveform.path", title: String(localized: "Vibra", bundle: AppLocalization.bundle), action: "vibrate")
+                    OutputButton(symbol: "speaker.wave.2", title: String(localized: "Suona", bundle: AppLocalization.bundle), action: "beep")
                     OutputButton(symbol: "lightbulb", title: "LED", action: "led")
                 }
                 .padding(.top, 8)
             }
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "record.circle").foregroundStyle(Palette.orange).font(.title2)
-                Text("Tieni premuto B. Attendi REC, parla e rilascia: la tua idea resta sullo StopWatch, anche offline.")
+                Text(String(localized: "Tieni premuto B. Attendi REC, parla e rilascia: la tua idea resta sullo StopWatch, anche offline.", bundle: AppLocalization.bundle))
                     .font(.subheadline).foregroundStyle(.white.opacity(0.75))
             }.padding(.horizontal, 8).padding(.top, 12)
         }
@@ -176,33 +178,33 @@ struct CompanionView: View {
                     Spacer()
                     Image(systemName: "house").font(.title2).accessibilityHidden(true)
                 }
-                Text(connection.status?.mqttConnected == true ? "Tutto collegato." : "Un posto anche\nper StopWatch.")
+                Text(connection.status?.mqttConnected == true ? String(localized: "Tutto collegato.", bundle: AppLocalization.bundle) : String(localized: "Un posto anche\nper StopWatch.", bundle: AppLocalization.bundle))
                     .font(.largeTitle.weight(.medium)).padding(.top, 20)
-                Text("In casa usi il Wi-Fi diretto. Fuori casa il Companion può inoltrare i comandi di Casa e Spotify con i dati dell’iPhone.")
+                Text(String(localized: "In casa usi il Wi-Fi diretto. Fuori casa il Companion può inoltrare i comandi di Casa e Spotify con i dati dell’iPhone.", bundle: AppLocalization.bundle))
                     .font(.body).foregroundStyle(Palette.secondary).padding(.top, 4)
                 Divider().padding(.vertical, 8)
-                LabeledContent("Wi-Fi StopWatch", value: connection.status?.wifi == true ? "Connesso" : "Non connesso")
+                LabeledContent("Wi-Fi StopWatch", value: connection.status?.wifi == true ? String(localized: "Connesso", bundle: AppLocalization.bundle) : String(localized: "Non connesso", bundle: AppLocalization.bundle))
                     .font(.subheadline)
                 LabeledContent("Mosquitto / MQTT", value: mqttState)
                     .font(.subheadline.weight(.medium))
                 if let broker = connection.configuration?.mqttHost, !broker.isEmpty {
                     Text(broker).font(.caption.monospaced()).foregroundStyle(Palette.secondary)
                 }
-                LabeledContent("Ponte iPhone", value: connection.relayEnabled ? "Abilitato" : "Da configurare")
+                LabeledContent(String(localized: "Ponte iPhone", bundle: AppLocalization.bundle), value: connection.relayEnabled ? String(localized: "Abilitato", bundle: AppLocalization.bundle) : String(localized: "Da configurare", bundle: AppLocalization.bundle))
                     .font(.subheadline)
                 NavigationLink { RelaySettingsView().preferredColorScheme(.light).tint(.primary) } label: {
-                    Label("Internet tramite iPhone", systemImage: "iphone.radiowaves.left.and.right")
+                    Label(String(localized: "Internet tramite iPhone", bundle: AppLocalization.bundle), systemImage: "iphone.radiowaves.left.and.right")
                         .font(.headline).foregroundStyle(Palette.ink).frame(minHeight: 44)
                 }
                 Button { mqttSettings = true } label: {
-                    Label("Configura integrazione", systemImage: "arrow.up.right")
+                    Label(String(localized: "Configura integrazione", bundle: AppLocalization.bundle), systemImage: "arrow.up.right")
                         .font(.headline).foregroundStyle(Palette.ink).frame(minHeight: 44)
                 }.buttonStyle(.plain).padding(.top, 8)
                     .disabled(!connection.ready || connection.working || connection.configuration == nil)
             }
             PaperCard {
-                HStack { Text("Sul dispositivo").font(.title2.weight(.medium)); Spacer(); Image(systemName: "star") }
-                Text("Scegli fino a otto preferiti da richiamare con i due pulsanti.")
+                HStack { Text(String(localized: "Sul dispositivo", bundle: AppLocalization.bundle)).font(.title2.weight(.medium)); Spacer(); Image(systemName: "star") }
+                Text(String(localized: "Scegli fino a otto preferiti da richiamare con i due pulsanti.", bundle: AppLocalization.bundle))
                     .font(.subheadline).foregroundStyle(Palette.secondary)
                 if let favorites = connection.configuration?.favorites, !favorites.isEmpty {
                     ForEach(Array(favorites.enumerated()), id: \.offset) { _, favorite in
@@ -210,18 +212,18 @@ struct CompanionView: View {
                         HStack { Image(systemName: "circle.grid.2x2"); Text(favorite.label); Spacer() }
                     }
                 } else {
-                    Text("I tuoi preferiti compariranno qui.").font(.subheadline).foregroundStyle(Palette.secondary).padding(.vertical, 16)
+                    Text(String(localized: "I tuoi preferiti compariranno qui.", bundle: AppLocalization.bundle)).font(.subheadline).foregroundStyle(Palette.secondary).padding(.vertical, 16)
                 }
             }
         }
     }
 
     private var mqttState: String {
-        guard connection.ready else { return "StopWatch scollegato" }
-        if connection.status?.mqttConnected == true { return "Connesso" }
-        if connection.configuration?.mqttHost.isEmpty != false { return "Da configurare" }
-        if connection.status?.wifi == false { return "In attesa del Wi-Fi" }
-        return "Non connesso"
+        guard connection.ready else { return String(localized: "StopWatch scollegato", bundle: AppLocalization.bundle) }
+        if connection.status?.mqttConnected == true { return String(localized: "Connesso", bundle: AppLocalization.bundle) }
+        if connection.configuration?.mqttHost.isEmpty != false { return String(localized: "Da configurare", bundle: AppLocalization.bundle) }
+        if connection.status?.wifi == false { return String(localized: "In attesa del Wi-Fi", bundle: AppLocalization.bundle) }
+        return String(localized: "Non connesso", bundle: AppLocalization.bundle)
     }
 }
 
@@ -280,102 +282,130 @@ private struct OutputButton: View {
         .buttonStyle(.plain)
         .disabled(!connection.ready || connection.working || connection.status?.recording == true)
         .opacity(connection.ready ? 1 : 0.4)
-        .accessibilityHint("Esegue il comando sullo StopWatch")
+        .accessibilityHint(String(localized: "Esegue il comando sullo StopWatch", bundle: AppLocalization.bundle))
     }
 }
 
 private struct NotesPage: View {
     @EnvironmentObject private var connection: WatchConnection
+    @State private var query = ""
+    @State private var renaming: VoiceNote?
+    @State private var editedTitle = ""
+    @State private var titleError: String?
     @State private var deleting: VoiceNote?
     @State private var playback: AudioFile?
     @State private var transfer: Task<Void, Never>?
     struct AudioFile: Identifiable { let id = UUID(); let url: URL }
 
+    private var filteredNotes: [VoiceNote] {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return connection.notes.filter { text.isEmpty || connection.title(for: $0).localizedStandardContains(text) || (connection.transcripts[$0.name]?.localizedStandardContains(text) == true) }
+    }
     var body: some View {
         VStack(spacing: 12) {
             PaperCard {
-                Label("Le idee diventano testo.", systemImage: "text.bubble").font(.headline)
-                Text("Le note usano il Wi-Fi quando raggiungibile e Bluetooth fuori rete. La ricezione può continuare a schermo bloccato; apri l'app per la trascrizione in italiano. Audio e testo restano disponibili offline.")
+                Label(String(localized: "Le idee diventano testo.", bundle: AppLocalization.bundle), systemImage: "text.bubble").font(.headline)
+                Text(String(localized: "Le note usano il Wi-Fi quando raggiungibile e Bluetooth fuori rete. La ricezione può continuare a schermo bloccato; apri l'app per la trascrizione nella lingua scelta. Audio e testo restano disponibili offline.", bundle: AppLocalization.bundle))
                     .font(.subheadline).foregroundStyle(Palette.secondary)
             }
             if let progress = connection.downloadProgress {
                 PaperCard {
-                    Text(connection.receivingViaWiFi ? "La tua nota arriva via Wi-Fi." : "La tua nota sta arrivando.").font(.title2.weight(.medium))
+                    Text(connection.receivingViaWiFi ? String(localized: "La tua nota arriva via Wi-Fi.", bundle: AppLocalization.bundle) : String(localized: "La tua nota sta arrivando.", bundle: AppLocalization.bundle)).font(.title2.weight(.medium))
                     ProgressView(value: progress).tint(Palette.ink)
                     HStack {
                         Text(progress, format: .percent.precision(.fractionLength(0))).monospacedDigit()
                         Spacer()
-                        Button("Annulla") { transfer?.cancel(); connection.cancelNoteSync() }.frame(minHeight: 44)
+                        Button(String(localized: "Annulla", bundle: AppLocalization.bundle)) { transfer?.cancel(); connection.cancelNoteSync() }.frame(minHeight: 44)
                     }
-                    Text("La copia originale rimane sul dispositivo.").font(.caption).foregroundStyle(Palette.secondary)
+                    Text(String(localized: "La copia originale rimane sul dispositivo.", bundle: AppLocalization.bundle)).font(.caption).foregroundStyle(Palette.secondary)
                 }
             }
             if connection.notes.isEmpty {
                 PaperCard {
                     Image(systemName: "waveform").font(.system(size: 42, weight: .ultraLight)).padding(.vertical, 24)
-                    Text("Spazio alle idee.").font(.largeTitle.weight(.medium))
-                    Text(connection.ready ? "Tieni premuto B sul dispositivo, attendi REC e parla. Al rilascio la nota arriva qui automaticamente." : "Collega StopWatch per ritrovare le tue registrazioni e trasformarle in testo.")
+                    Text(String(localized: "Spazio alle idee.", bundle: AppLocalization.bundle)).font(.largeTitle.weight(.medium))
+                    Text(connection.ready ? String(localized: "Tieni premuto B sul dispositivo, attendi REC e parla. Al rilascio la nota arriva qui automaticamente.", bundle: AppLocalization.bundle) : String(localized: "Collega StopWatch per ritrovare le tue registrazioni e trasformarle in testo.", bundle: AppLocalization.bundle))
                         .font(.body).foregroundStyle(Palette.secondary)
                 }
             }
-            ForEach(connection.notes) { note in
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(Palette.secondary)
+                TextField(String(localized: "Cerca titoli e trascrizioni", bundle: AppLocalization.bundle), text: $query).accessibilityLabel(String(localized: "Cerca note", bundle: AppLocalization.bundle))
+                if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44) }.accessibilityLabel(String(localized: "Cancella ricerca", bundle: AppLocalization.bundle)) }
+            }.padding(.horizontal, 18).frame(minHeight: 56).background(.white, in: RoundedRectangle(cornerRadius: 22))
+            if let titleError { Text(titleError).font(.footnote).foregroundStyle(.red) }
+            if !connection.notes.isEmpty && filteredNotes.isEmpty { PaperCard { Text(String(localized: "Nessuna nota trovata.", bundle: AppLocalization.bundle)).foregroundStyle(Palette.secondary) } }
+            ForEach(filteredNotes) { note in
                 PaperCard {
                     HStack {
                         Image(systemName: "waveform").font(.title2).frame(width: 44, height: 44).background(.black.opacity(0.04), in: Circle())
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(note.title).font(.headline)
+                            Text(connection.title(for: note)).font(.headline)
                             Text(note.duration + " · " + ByteCountFormatter.string(fromByteCount: Int64(note.bytes), countStyle: .file))
                                 .font(.caption).foregroundStyle(Palette.secondary)
                         }
                         Spacer(minLength: 0)
+                        Button { editedTitle = connection.noteTitles[note.name] ?? ""; renaming = note } label: { Image(systemName: "pencil").frame(width: 44, height: 44) }
+                            .disabled(connection.localURL(for: note) == nil).accessibilityLabel(String(localized: "Modifica titolo nota", bundle: AppLocalization.bundle))
                     }
                     if let seconds = connection.transferSeconds[note.name] {
-                        Text("\(connection.transferMethods[note.name] ?? "Bluetooth") · ricevuta in \(seconds, specifier: "%.1f") s")
+                        Text(String(format: String(localized: "%@ · ricevuta in %.1f s", bundle: AppLocalization.bundle), connection.transferMethods[note.name] ?? "Bluetooth", seconds))
                             .font(.caption).foregroundStyle(Palette.secondary)
                     }
                     if let text = connection.transcripts[note.name] {
                         Text(text).font(.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                        ShareLink(item: text) { Label("Condividi testo", systemImage: "square.and.arrow.up") }
+                        ShareLink(item: connection.title(for: note) + "\n\n" + text) { Label(String(localized: "Condividi testo", bundle: AppLocalization.bundle), systemImage: "square.and.arrow.up") }
                             .font(.subheadline.weight(.medium)).tint(Palette.ink).frame(minHeight: 44)
                     } else if connection.syncingNote == note.name {
                         HStack {
                             ProgressView().tint(Palette.ink)
-                            Text(connection.downloadProgress == nil ? "Trascrizione in corso…" : "Ricezione audio…")
+                            Text(connection.downloadProgress == nil ? String(localized: "Trascrizione in corso…", bundle: AppLocalization.bundle) : String(localized: "Ricezione audio…", bundle: AppLocalization.bundle))
                         }.font(.subheadline).foregroundStyle(Palette.secondary)
                     } else if let error = connection.transcriptionErrors[note.name] {
                         Text(error).font(.subheadline).foregroundStyle(Palette.secondary)
-                        Button("Riprova trascrizione") { connection.retryTranscription(note) }
+                        Button(String(localized: "Riprova trascrizione", bundle: AppLocalization.bundle)) { connection.retryTranscription(note) }
                             .font(.subheadline.weight(.medium)).tint(Palette.ink).frame(minHeight: 44)
                     } else {
-                        Text("In attesa della trascrizione automatica…").font(.subheadline).foregroundStyle(Palette.secondary)
+                        Text(String(localized: "In attesa della trascrizione automatica…", bundle: AppLocalization.bundle)).font(.subheadline).foregroundStyle(Palette.secondary)
                     }
                     HStack {
                         if let url = connection.localURL(for: note) {
-                            Button { playback = AudioFile(url: url) } label: { Label("Ascolta", systemImage: "play.fill").frame(minHeight: 44) }
+                            Button { playback = AudioFile(url: url) } label: { Label(String(localized: "Ascolta", bundle: AppLocalization.bundle), systemImage: "play.fill").frame(minHeight: 44) }
                             Spacer()
                             ShareLink(item: url) { Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44) }
-                                .accessibilityLabel("Condividi nota")
+                                .accessibilityLabel(String(localized: "Condividi nota", bundle: AppLocalization.bundle))
                         } else {
-                            Button { download(note) } label: { Label("Scarica", systemImage: "arrow.down").frame(minHeight: 44) }
+                            Button { download(note) } label: { Label(String(localized: "Scarica", bundle: AppLocalization.bundle), systemImage: "arrow.down").frame(minHeight: 44) }
                                 .disabled(!connection.ready || connection.working || connection.syncingNote != nil)
                             Spacer()
                         }
                         Button(role: .destructive) { deleting = note } label: { Image(systemName: "trash").frame(width: 44, height: 44) }
-                            .disabled(!connection.isOnDevice(note) || connection.working || connection.syncingNote == note.name).accessibilityLabel("Elimina nota dallo StopWatch")
+                            .disabled(!connection.isOnDevice(note) || connection.working || connection.syncingNote == note.name).accessibilityLabel(String(localized: "Elimina nota dallo StopWatch", bundle: AppLocalization.bundle))
                     }
                     .font(.subheadline.weight(.medium)).tint(Palette.ink)
                 }
             }
             Button { Task { await connection.refreshNotes() } } label: {
-                Label("Aggiorna note", systemImage: "arrow.clockwise").frame(minHeight: 48)
+                Label(String(localized: "Aggiorna note", bundle: AppLocalization.bundle), systemImage: "arrow.clockwise").frame(minHeight: 48)
             }.disabled(!connection.ready || connection.working)
         }
         .task { await connection.refreshNotes() }
-        .confirmationDialog("Eliminare la nota dallo StopWatch?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+        .confirmationDialog(String(localized: "Eliminare la nota dallo StopWatch?", bundle: AppLocalization.bundle), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             if let note = deleting {
-                Button("Elimina dal dispositivo", role: .destructive) { Task { await connection.delete(note) }; deleting = nil }
+                Button(String(localized: "Elimina dal dispositivo", bundle: AppLocalization.bundle), role: .destructive) { Task { await connection.delete(note) }; deleting = nil }
             }
-        } message: { Text("La cancellazione sullo StopWatch è definitiva. Una copia già scaricata su iPhone viene conservata.") }
+        } message: { Text(String(localized: "La cancellazione sullo StopWatch è definitiva. Una copia già scaricata su iPhone viene conservata.", bundle: AppLocalization.bundle)) }
+        .alert(String(localized: "Titolo della nota", bundle: AppLocalization.bundle), isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField(String(localized: "Titolo", bundle: AppLocalization.bundle), text: $editedTitle)
+            Button(String(localized: "Salva", bundle: AppLocalization.bundle)) {
+                if let note = renaming {
+                    do { try connection.rename(note, title: editedTitle); titleError = nil }
+                    catch { titleError = error.localizedDescription }
+                }
+                renaming = nil
+            }
+            Button(String(localized: "Annulla", bundle: AppLocalization.bundle), role: .cancel) { renaming = nil }
+        } message: { Text(String(localized: "Il titolo viene salvato su questo iPhone. Lascia vuoto per usare il nome originale.", bundle: AppLocalization.bundle)) }
         .sheet(item: $playback) { file in AudioPlayerView(url: file.url) }
         .onDisappear { transfer?.cancel() }
     }
@@ -400,7 +430,7 @@ private struct AudioPlayerView: View {
         NavigationStack {
             VStack(spacing: 28) {
                 Image(systemName: "waveform").font(.system(size: 72, weight: .ultraLight))
-                Text("La tua idea.").font(.largeTitle.weight(.medium))
+                Text(String(localized: "La tua idea.", bundle: AppLocalization.bundle)).font(.largeTitle.weight(.medium))
                 Text(url.lastPathComponent).font(.caption).foregroundStyle(.secondary)
                 if let error { Text(error).font(.subheadline) }
                 TimelineView(.periodic(from: .now, by: 0.5)) { _ in
@@ -416,17 +446,17 @@ private struct AudioPlayerView: View {
                                 }
                             } catch { self.error = error.localizedDescription }
                         } label: {
-                            Label(player?.isPlaying == true ? "Pausa" : "Riproduci", systemImage: player?.isPlaying == true ? "pause.fill" : "play.fill")
+                            Label(player?.isPlaying == true ? String(localized: "Pausa", bundle: AppLocalization.bundle) : String(localized: "Riproduci", bundle: AppLocalization.bundle), systemImage: player?.isPlaying == true ? "pause.fill" : "play.fill")
                                 .frame(minWidth: 160, minHeight: 54)
                         }
                         .buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black)
                     }
-                    .accessibilityValue(playing ? "Riproduzione" : "In pausa")
+                    .accessibilityValue(playing ? String(localized: "Riproduzione", bundle: AppLocalization.bundle) : String(localized: "In pausa", bundle: AppLocalization.bundle))
                 }
-                ShareLink("Condividi audio", item: url)
+                ShareLink(String(localized: "Condividi audio", bundle: AppLocalization.bundle), item: url)
             }
             .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fine") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(String(localized: "Fine", bundle: AppLocalization.bundle)) { dismiss() } } }
         }
         .onAppear {
             do { player = try AVAudioPlayer(contentsOf: url); player?.prepareToPlay() }

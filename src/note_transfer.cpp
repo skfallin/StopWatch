@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "note_transfer.h"
 #include "policy.h"
 #include "http_transfer.h"
@@ -183,9 +184,9 @@ esp_err_t NoteTransfer::receiveBadge(httpd_req_t* request) {
         [](int count) { return count==HTTPD_SOCK_ERR_TIMEOUT || count==ESP_TLS_ERR_SSL_WANT_READ || count==ESP_TLS_ERR_SSL_WANT_WRITE; },
         [] { delay(1); });
     if(result!=transfer::Result::Complete) {
-        const char* error=result==transfer::Result::Timeout?"Pausa troppo lunga nell'invio Wi-Fi":
-            result==transfer::Result::Closed?"L'iPhone ha chiuso la connessione Wi-Fi":
-            result==transfer::Result::WriteError?"Scrittura dell'archivio Badge interrotta":"Errore di lettura della connessione Wi-Fi";
+        const char* error=result==transfer::Result::Timeout?i18n::text("Pausa troppo lunga nell'invio Wi-Fi"):
+            result==transfer::Result::Closed?i18n::text("L'iPhone ha chiuso la connessione Wi-Fi"):
+            result==transfer::Result::WriteError?i18n::text("Scrittura dell'archivio Badge interrotta"):i18n::text("Errore di lettura della connessione Wi-Fi");
         self.badge_.transferFailed(upload,error);
         Serial.printf("[badge-wifi] ricezione interrotta: risultato=%u socket=%d\n",unsigned(result),socketError);
         httpd_resp_send_err(request,result==transfer::Result::Timeout?HTTPD_408_REQ_TIMEOUT:HTTPD_500_INTERNAL_SERVER_ERROR,error);

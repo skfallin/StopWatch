@@ -1,0 +1,24 @@
+<!doctype html><html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>StopWatch · prova Chiave USB</title>
+<style>body{background:#101310;color:#f4f6f0;font:18px system-ui;max-width:680px;margin:70px auto;padding:24px}h1{font-size:34px}p{line-height:1.6;color:#b8c1b8}button{font:inherit;background:#b5edbd;color:#101310;border:0;border-radius:22px;padding:16px 24px;margin:8px 12px 8px 0;cursor:pointer}button:disabled{opacity:.5}#result{white-space:pre-wrap;border:1px solid #475047;border-radius:22px;padding:24px;line-height:1.7}small{color:#adb6ad}</style>
+<small>STOPWATCH · CHIAVE USB · LAB</small><h1>Una prova, nessun account.</h1>
+<p>Lascia aperta «Chiave USB · LAB» sullo StopWatch. Crea una passkey per <b>localhost</b>, scegli un PIN nella finestra del browser e conferma con <b>B blu</b> sul dispositivo. Non usare il PIN di altri account.</p>
+<button id="create">1. Crea passkey di prova</button><button id="verify">2. Verifica firma e PRF</button>
+<p>Ripeti la verifica due volte, poi riavvia lo StopWatch, riapri Chiave USB e verifica ancora. Servono un browser Chromium aggiornato e un cavo USB dati.</p>
+<div id="result" aria-live="polite">Pronto. Questa pagina non riceve il PIN e non salva il risultato PRF.</div>
+<script>
+const token='__TOKEN__', out=document.querySelector('#result'), buttons=[...document.querySelectorAll('button')];
+let previous=null, count=0;
+const decode=s=>Uint8Array.from(atob(s.replaceAll('-','+').replaceAll('_','/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));
+const encode=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
+async function post(path,body){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Lab':token},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw Error(data.error);return data;}
+function serialize(c){const r=c.response;const result={id:c.id,rawId:encode(c.rawId),type:c.type,response:{clientDataJSON:encode(r.clientDataJSON)},clientExtensionResults:{}};if(r.attestationObject)result.response.attestationObject=encode(r.attestationObject);else{result.response.authenticatorData=encode(r.authenticatorData);result.response.signature=encode(r.signature);result.response.userHandle=r.userHandle?encode(r.userHandle):null;}return result;}
+async function run(create){buttons.forEach(b=>b.disabled=true);out.textContent='Completa la richiesta del browser. Premi B blu solo quando lo StopWatch mostra localhost.';
+try{const kind=create?'register':'get', begin=await post('/'+kind+'/begin',{}), pk=begin.options.publicKey;pk.challenge=decode(pk.challenge);pk.timeout=120000;if(create){pk.user.id=decode(pk.user.id);pk.pubKeyCredParams=[{type:'public-key',alg:-7}];}else{pk.extensions={prf:{eval:{first:new TextEncoder().encode('StopWatch prova PRF stabile'),second:new TextEncoder().encode('StopWatch prova PRF diversa')}}};}
+const c=await navigator.credentials[create?'create':'get']({publicKey:pk}), ext=c.getClientExtensionResults();
+const result=await post('/'+kind+'/complete',{request:begin.request,credential:serialize(c)});
+if(create){previous=null;count=0;out.textContent='Passkey residente creata e verificata con PIN e pulsante fisico.\nPRF abilitata: '+(ext.prf?.enabled?'sì':'non confermata dal browser')+'\nPremi «Verifica firma e PRF» due volte.';}
+else{const first=ext.prf?.results?.first,second=ext.prf?.results?.second;if(!first||!second)throw Error('Firma valida, ma il browser non ha restituito PRF.');const a=new Uint8Array(first),b=new Uint8Array(second);if(a.length!==32||b.length!==32)throw Error("PRF: lunghezza non valida.");const same=previous?a.every((v,i)=>v===previous[i]):null;if(a.every((v,i)=>v===b[i]))throw Error('PRF: input diversi hanno prodotto lo stesso risultato.');if(same===false)throw Error('PRF: risultato cambiato per lo stesso input.');previous=a.slice();++count;out.textContent='Firma, challenge, origine, PIN e presenza fisica: verificati.\nContatore: '+result.counter+'\nPRF: 32 byte, input diversi separati.\nRisultato stabile: '+(same?'sì, verifica '+count:'ripeti la verifica per confrontare')+'\nIl valore PRF rimane soltanto nella memoria di questa pagina.';}}
+catch(e){out.textContent='Prova non completata: '+e.message+'\nSeleziona «Chiave di sicurezza» nel browser e lascia Chiave USB aperta sullo StopWatch.';}finally{buttons.forEach(b=>b.disabled=false);}}
+document.querySelector('#create').onclick=()=>run(true);document.querySelector('#verify').onclick=()=>run(false);
+</script></html>

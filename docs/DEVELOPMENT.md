@@ -1,97 +1,64 @@
-# Sviluppo e verifiche
+# Development and verification
 
-## Preparazione
+[Italiano](DEVELOPMENT.it.md) · [Setup](SETUP.md)
 
-Seguire [SETUP.md](SETUP.md) e completare almeno una compilazione firmware: alcuni test riusano ArduinoJson da `.pio/libdeps/stopwatch/ArduinoJson/src`. I test Python richiedono il compilatore `clang++` nel `PATH`; i test blueprint richiedono Jinja2 e PyYAML, inclusi in `requirements-dev.txt`.
+Install `requirements-dev.txt` into a virtual environment. The checked-in Xcode project is usable directly; `ios/project.yml` is its XcodeGen specification. Do not commit local signing-team changes. Firmware libraries/toolchain are pinned in `platformio.ini`.
 
-## Test del firmware senza hardware
-
-Dalla radice, con un compilatore C++17:
+## One verification command
 
 ```sh
-for name in core clock relay http_transfer; do
-  clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
-    -Iinclude "tests/${name}_test.cpp" -o "/tmp/stopwatch-${name}-test"
-  "/tmp/stopwatch-${name}-test"
-done
-
-clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -Iinclude -I.pio/libdeps/stopwatch/ArduinoJson/src \
-  tests/music_test.cpp -o /tmp/stopwatch-music-test
-/tmp/stopwatch-music-test
-
-.venv/bin/python tests/quiet_test.py
-.venv/bin/python tests/power_test.py
-.venv/bin/python tests/home_interaction_test.py
-.venv/bin/python tests/relay_dispatch_test.py
-.venv/bin/python tests/artwork_cache_test.py
-.venv/bin/python -m unittest discover -s tests -p '*blueprint_test.py'
+.venv/bin/python tools/verify.py --firmware
 ```
 
-I test Python che estraggono le funzioni del firmware compilano il codice reale con backend controllati. Controllano, tra l’altro, conferme delle azioni, silenzio globale, frequenza CPU, luminosità, compatibilità della configurazione, cache e scelta del trasporto. Non sostituiscono un collaudo radio o una misura dell’autonomia.
+This builds the normal firmware, checks generated translations, scans working files and reachable Git blobs for high-confidence secret patterns, and runs the C++/Python checks. It never flashes a device or contacts your Home Assistant. After the first build, omit `--firmware` to reuse the installed ArduinoJson headers.
 
-Per l’archivio audio, su macOS:
+On macOS with Xcode selected, also run:
 
 ```sh
-clang++ -std=c++17 -Wall -Wextra -Werror -Wno-deprecated-declarations \
-  -fsanitize=address,undefined -Itests/audio_support -Iinclude -Isrc \
-  tests/audio_archive_test.cpp src/ui_sounds.cpp -lz -o /tmp/stopwatch-audio-test
-/tmp/stopwatch-audio-test assets/sounds/ui-sounds.bin
+.venv/bin/python tools/verify.py --swift --lab
+xcodebuild -project ios/StopWatch.xcodeproj -scheme StopWatch \
+  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/stopwatch-derived CODE_SIGNING_ALLOWED=NO build
 ```
 
-Il supporto SHA-256 del test usa CommonCrypto. Un porting di questo test a Linux richiede un backend equivalente; il firmware usa invece mbedTLS/ESP-IDF.
+`--swift` tests Companion models/protocols and the Swift-to-C++ Badge fixture. `--lab` compiles the opt-in experimental FIDO firmware; it does not enroll any credentials. The audio archive tests use CommonCrypto and run on macOS. Linux runs the portable host checks. The GitHub Actions workflow covers both runners, Swift tests on macOS and an unsigned simulator build. Remote CI results are only available after pushing.
 
-Per verificare anche l’installer e i suoi errori di scrittura/rename, ripetere la compilazione del test audio aggiungendo `-DSFX_SEED_ARCHIVE`, poi eseguire lo stesso comando con `assets/sounds/ui-sounds.bin`.
+When Xcode is installed but not selected, set `DEVELOPER_DIR` to your own Xcode application's `Contents/Developer`. Test temporary files use the OS temporary directory. No personal absolute paths are required.
 
-## Companion iOS
+## Languages and configuration
 
-I test dei modelli e del protocollo girano su macOS senza simulatore:
+`locales/en.json` maps existing Italian message keys to reviewed English translations. Firmware uses an explicit lookup before composing messages, so user-provided names and protocol IDs are never translated. `language` and `time_zone` are optional configuration fields; old clients preserve them. Existing saved configurations lacking these fields migrate to Italian/Rome; new devices start in English/UTC.
+
+The firmware publishes supported `time_zones`; Companion and portal use that list. Rules live in `include/regional_settings.h` and are intentionally versioned, not fetched from a network. Add tests when changing DST rules. Do not silently use a fixed UTC offset for a region with DST.
+
+The app uses native Foundation localization and en/it resources, with English as the development language. App language follows iOS. Speech recognition is on-device only and has a separate en-US/en-GB/it-IT selection. Existing paired installations retain their previous Italian speech/keyboard defaults.
 
 ```sh
-STOPWATCH_BADGE_FIXTURE=/tmp/stopwatch-badge-fixture.swb \
-  xcrun swift test --package-path ios --scratch-path /tmp/stopwatch-protocol-tests
+.venv/bin/python tools/generate_localizations.py
+.venv/bin/python tools/generate_localizations.py --check
 ```
 
-La variabile facoltativa esporta un Badge sintetico a quattro quadranti tramite l’encoder Swift reale. Serve al test di interoperabilità C++:
+Edit `web/portal.html`, not its generated `src/portal_page.h`. Do not edit generated `include/i18n.h` or `Localizable.strings` directly. If adding Swift interpolation, update the generator's format mapping and check compiler-extracted `.stringsdata`; formatting arguments must match in both languages. Native iOS permission strings live in each `InfoPlist.strings`.
 
-```sh
-clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -Iinclude tests/badge_test.cpp -lz -o /tmp/stopwatch-badge-test
-/tmp/stopwatch-badge-test /tmp/stopwatch-badge-fixture.swb
-```
+## Assets and visual checks
 
-Il test richiede il percorso del file esportato e zlib (`-lz`), fornita dal sistema su macOS. Non usare un’immagine personale come fixture.
-
-La compilazione per iPhone richiede Xcode e un proprio Team configurato. Le istruzioni per firma, simulatore e dispositivo reale sono in [ios/README.md](../ios/README.md). Conservare bundle ID e identità di firma durante gli aggiornamenti per mantenere l’app esistente e i suoi dati.
-
-Il progetto Xcode è incluso. Se si usa XcodeGen, `ios/project.yml` è la specifica: mantenerla allineata a versioni, file e impostazioni del progetto generato. Non pubblicare profili, certificati o chiavi Apple.
-
-## Asset e anteprime
-
-I file generati sono già versionati. Rigenerarli solo quando si modifica la risorsa sorgente:
+Fonts, sounds and app icons are included. Regeneration is optional and may require ffmpeg/Xcode:
 
 ```sh
 .venv/bin/python tools/generate_ui_fonts.py
 .venv/bin/python tools/generate_ui_sounds.py
-.venv/bin/python tools/render_clock_preview.py /tmp/stopwatch-clock-preview
-.venv/bin/python tools/render_clock_preview.py /tmp/stopwatch-music-preview --music
-.venv/bin/python tools/render_clock_preview.py /tmp/stopwatch-quick-preview --quick
+.venv/bin/python tools/render_clock_preview.py /tmp/stopwatch-scene --scene
+.venv/bin/python tools/render_clock_preview.py /tmp/stopwatch-clock
 ```
 
-La generazione dei suoni richiede `ffmpeg` nel `PATH`. Font, suoni, catalogo e archivio devono restare coerenti: eseguire i relativi controlli prima di caricare sul dispositivo. L’icona iOS e il disegno nella home condividono `WatchDrawing.swift`:
+The host renderer runs production drawing code. Label checks cover English and Italian launcher names. It does not verify screen hardware, radio behavior, haptics or battery life.
 
-```sh
-xcrun swiftc ios/StopWatch/WatchDrawing.swift tools/render_app_icon.swift -o /tmp/render-stopwatch-icon
-/tmp/render-stopwatch-icon
-```
+## Release procedure
 
-## Modifiche e consegna
+1. Review intended tracked and untracked files; a successful local build may still depend on files absent from Git.
+2. Run checks in a clean source snapshot/checkout with only intended source files. Include generated assets and vendored LAB sources/licenses.
+3. Build and verify the sound installer as well as the normal firmware. Preserve `partitions.csv`.
+4. Complete [hardware checks](STATUS.md), document exact versions and remaining limits, and review third-party notices, historical assets and personal data.
+5. Create release artifacts/checksums only from that verified version. Visibility changes, pushes, tags, GitHub releases and app distribution are separate explicit operations.
 
-- Tenere separati codice del firmware, configurazione personale e dati degli utenti.
-- Per una modifica al protocollo, aggiornare entrambi i client interessati e i test; non rimuovere la compatibilità senza una migrazione esplicita.
-- Aggiornare `include/firmware.h` per il firmware; per l’app aggiornare versione e build in `ios/project.yml` e nel progetto Xcode.
-- Documentare cosa è stato verificato automaticamente e cosa richiede ancora hardware.
-- Prima di fare push controllare `git diff --cached`, i file aggiunti e [SECURITY.md](../SECURITY.md).
-- Non eseguire flash, cancellazioni dell’archivio, aggiornamenti Home Assistant o pubblicazioni dell’app come effetto collaterale di un test locale.
-
-Per il flusso Git usare modifiche piccole e rami `codex/<descrizione>` quando serve un ramo di lavoro. La creazione di una repository privata non autorizza a cambiarne successivamente la visibilità o ad aggiungere collaboratori.
+The secret-pattern guard is deliberately limited. It does not prove absence of all passwords, Home Assistant tokens, personal data or licensing issues. Review history, GitHub logs/artifacts and screenshots before making the repository public.

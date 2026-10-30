@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "music_view.h"
 #include <filesystem>
 #include <fstream>
@@ -11,7 +12,8 @@ void label(M5Canvas& c,const String& value,int x,int y,Font font,uint32_t color,
 }
 
 int main(int argc,char** argv) {
-    if(argc!=2) return 1;
+    if(argc<2 || argc>3) return 1;
+    i18n::italian = argc==3 && std::string(argv[2])=="it";
     const std::filesystem::path root=argv[1];std::filesystem::create_directories(root);
     const auto frame=[&](const String& name,const std::function<void(M5Canvas&)>& draw) {
         std::ofstream output(root/(name+".jsonl"));M5Canvas canvas(output);draw(canvas);

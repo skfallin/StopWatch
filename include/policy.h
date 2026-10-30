@@ -1,4 +1,5 @@
 #pragma once
+#include "i18n.h"
 
 #include <array>
 #include <cstddef>

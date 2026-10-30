@@ -1,0 +1,178 @@
+blueprint:
+  name: StopWatch — Spotify
+  description: >-
+    Collega lo StopWatch all'account Spotify Premium configurato in Home Assistant.
+    Segue il lettore attivo su telefono, computer e Spotify Connect.
+    Comandi e aggiornamenti passano dal broker MQTT già configurato.
+    Crea una sola automazione per StopWatch. Non riproduce audio sul dispositivo.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    stopwatch:
+      name: StopWatch
+      selector:
+        device:
+          filter:
+            - integration: mqtt
+              manufacturer: M5Stack
+              model: StopWatch C152
+            - integration: mqtt
+              manufacturer: M5Stack
+              model: StopWatch C152 · firmware personale
+    spotify:
+      name: Account Spotify
+      selector:
+        entity:
+          filter:
+            - integration: spotify
+              domain: media_player
+    ha_url:
+      name: Indirizzo di Home Assistant per la copertina
+      description: >-
+        Esempio http://192.168.0.150:8123, senza barra finale.
+        Lascia vuoto per usare l'indirizzo Home Assistant già salvato sullo StopWatch.
+        Su HTTPS occorre un certificato valido.
+      default: ""
+      selector:
+        text: {}
+
+variables:
+  device_id: !input stopwatch
+  entity: !input spotify
+  ha_url: !input ha_url
+  mqtt_id: >-
+    {% set ns = namespace(id='') %}
+    {% for domain, identifier in device_attr(device_id, 'identifiers') or [] %}
+      {% if domain == 'mqtt' and identifier.startswith('stopwatch_') %}
+        {% set ns.id = identifier %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.id }}
+
+triggers:
+  - trigger: mqtt
+    topic: stopwatch/+/music/request
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ mqtt_id | regex_match('^stopwatch_[0-9a-f]{12}$')
+         and trigger.topic.split('/')[1] == mqtt_id }}
+
+actions:
+  - variables:
+      request: "{{ trigger.payload_json if trigger.payload_json is defined and trigger.payload_json is mapping else {} }}"
+      command: "{{ request.get('command', '') }}"
+      services:
+        play: media_play
+        pause: media_pause
+        next: media_next_track
+        previous: media_previous_track
+        source: select_source
+  - condition: template
+    value_template: >-
+      {{ request.get('request') is integer and request.request is not boolean
+         and 0 <= request.request <= 4294967295
+         and command in ['refresh','play','pause','next','previous','source','playlists','playlist']
+         and (command in ['refresh','playlists'] or
+              (0 <= as_timestamp(now()) - (request.get('sent_at', 0) | float(0)) <= 5))
+         and (command != 'source' or request.get('source', '') in (state_attr(entity,'source_list') or []))
+         and (command != 'playlist' or request.get('playlist','') | regex_match('^spotify:playlist:[A-Za-z0-9]{22}$'))
+         and (command != 'playlists' or
+              (request.get('offset') is integer and request.offset is not boolean and 0 <= request.offset <= 10000 and request.offset % 8 == 0)) }}
+  - choose:
+      - conditions: "{{ command == 'playlists' }}"
+        sequence:
+          - action: media_player.browse_media
+            target:
+              entity_id: "{{ entity }}"
+            data:
+              media_content_type: current_user_playlists
+              media_content_id: current_user_playlists
+            response_variable: library
+            continue_on_error: true
+          - action: mqtt.publish
+            data:
+              topic: "stopwatch/{{ mqtt_id }}/music/result"
+              qos: 0
+              retain: false
+              payload: >-
+                {% set result = library | default({},true) %}
+                {% set directory = result.get(entity) or {} %}
+                {% set ns = namespace(all=[],items=[]) %}
+                {% for item in directory.children | default([],true) %}
+                  {% if item.can_play | default(false) and item.media_class | default('') == 'playlist'
+                        and item.media_content_id | default('') | regex_match('^spotify:playlist:[A-Za-z0-9]{22}$') %}
+                    {% set ns.all = ns.all + [item] %}
+                  {% endif %}
+                {% endfor %}
+                {% set total = [ns.all | length,10000] | min %}
+                {% for item in ns.all[request.offset:([request.offset + 8,total] | min)] %}
+                  {% set ns.items = ns.items + [dict(name=(item.title | default('Playlist',true))[:64],uri=item.media_content_id)] %}
+                {% endfor %}
+                {{ {'request':request.request,'success':entity in result and directory.children is defined,
+                    'playlists':{'offset':request.offset,'total':total,'items':ns.items}}
+                   | to_json(ensure_ascii=False) }}
+          - stop: Catalogo playlist inviato
+  - if: "{{ command != 'refresh' and states(entity) not in ['unknown','unavailable','off'] }}"
+    then:
+      - choose:
+          - conditions: "{{ command == 'source' }}"
+            sequence:
+              - action: media_player.select_source
+                target:
+                  entity_id: "{{ entity }}"
+                data:
+                  source: "{{ request.source }}"
+          - conditions: "{{ command == 'playlist' }}"
+            sequence:
+              - action: media_player.play_media
+                target:
+                  entity_id: "{{ entity }}"
+                data:
+                  media_content_type: playlist
+                  media_content_id: "{{ request.playlist }}"
+        default:
+          - action: "media_player.{{ services[command] }}"
+            target:
+              entity_id: "{{ entity }}"
+    else:
+      - action: homeassistant.update_entity
+        target:
+          entity_id: "{{ entity }}"
+        continue_on_error: true
+  - action: mqtt.publish
+    data:
+      topic: "stopwatch/{{ mqtt_id }}/music/result"
+      qos: 0
+      retain: false
+      payload: >-
+        {% set duration = [[state_attr(entity,'media_duration') | float(0),0] | max,604800] | min %}
+        {% set position = state_attr(entity,'media_position') | float(0) %}
+        {% set updated = as_timestamp(state_attr(entity,'media_position_updated_at'),as_timestamp(now())) %}
+        {% if states(entity) == 'playing' %}
+          {% set position = position + [0,as_timestamp(now()) - updated] | max %}
+        {% endif %}
+        {% set ns = namespace(sources=[]) %}
+        {% for source in (state_attr(entity,'source_list') or [])[:12] %}
+          {% if source is string and source.encode('utf-8') | length <= 128 %}
+            {% set ns.sources = ns.sources + [source] %}
+          {% endif %}
+        {% endfor %}
+        {{ {'request':request.request,
+            'success':states(entity) not in ['unknown','unavailable'],
+            'playback':{'state':states(entity),
+              'title':(state_attr(entity,'media_title') or '')[:64],
+              'artist':(state_attr(entity,'media_artist') or '')[:64],
+              'source':(state_attr(entity,'source') or '')[:128],
+              'sources':ns.sources,
+              'image':(state_attr(entity,'entity_picture') or '')[:1024],
+              'ha_url':ha_url | trim,
+              'features':state_attr(entity,'supported_features') | int(0),
+              'duration_ms':(duration * 1000) | int,
+              'position_ms':([[position,0] | max,duration] | min * 1000) | int}}
+           | to_json(ensure_ascii=False) }}
+
+mode: single
+max_exceeded: silent

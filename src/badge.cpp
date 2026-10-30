@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "badge.h"
 #include "policy.h"
 #include <LittleFS.h>
@@ -30,7 +31,7 @@ bool Badge::begin() {
     badge::Info loaded; String digest;
     if(file) {
         if(readInfo(file,loaded,digest)) { info_=loaded; digest_=digest; }
-        else error_="Badge salvato non valido";
+        else error_=i18n::text("Badge salvato non valido");
     }
     return true;
 }
@@ -111,7 +112,7 @@ bool Badge::update(uint32_t now, bool autoRotate, bool animate, bool visible) {
             if(cached_ && (!file || file.read(cached_,info_.bytes)!=info_.bytes)) { free(cached_); cached_=nullptr; }
         }
         if(!cached_ && !file) file=LittleFS.open("/badge.bin","r");
-        if((!cached_ && !file) || !decode(file,info_.frames[next],cached_?cached_+info_.frames[next].offset:nullptr)) { failed_=true; error_="Fotogramma Badge non leggibile"; }
+        if((!cached_ && !file) || !decode(file,info_.frames[next],cached_?cached_+info_.frames[next].offset:nullptr)) { failed_=true; error_=i18n::text("Fotogramma Badge non leggibile"); }
         else {
             image_.pushImage(0,0,badge::side,badge::side,reinterpret_cast<const lgfx::rgb565_t*>(work_->pixels));
             frame_=next;
@@ -155,17 +156,17 @@ void Badge::clearUpload() {
 void Badge::abortUpload() { if(mutex_) { Lock guard(mutex_); clearUpload(); } }
 
 bool Badge::startUpload(size_t bytes, const String& digest, JsonObject out, String& error) {
-    if(!mutex_) { error="Archivio Badge non disponibile"; return false; }
+    if(!mutex_) { error=i18n::text("Archivio Badge non disponibile"); return false; }
     if(bytes<badge::headerBytes+badge::entryBytes+badge::digestBytes || bytes>badge::maxBytes || digest.length()!=64) {
-        error="Badge troppo grande o non valido"; return false;
+        error=i18n::text("Badge troppo grande o non valido"); return false;
     }
-    for(char c:digest) if(!((c>='0'&&c<='9')||(c>='a'&&c<='f'))) { error="Impronta Badge non valida"; return false; }
+    for(char c:digest) if(!((c>='0'&&c<='9')||(c>='a'&&c<='f'))) { error=i18n::text("Impronta Badge non valida"); return false; }
     Lock guard(mutex_); clearUpload();
     if(LittleFS.totalBytes()-LittleFS.usedBytes()<bytes+policy::maxSamples*2+131072) {
-        error="Spazio insufficiente: conserva e rimuovi alcune note"; return false;
+        error=i18n::text("Spazio insufficiente: conserva e rimuovi alcune note"); return false;
     }
     upload_=LittleFS.open("/badge.upload","w");
-    if(!upload_) { error="Impossibile preparare il Badge"; return false; }
+    if(!upload_) { error=i18n::text("Impossibile preparare il Badge"); return false; }
     char id[17]; snprintf(id,sizeof(id),"%08lx%08lx",(unsigned long)esp_random(),(unsigned long)esp_random());
     uploadId_=id; expected_=bytes; expectedDigest_=digest; uploadAt_=millis();
     out["upload"]=uploadId_;
@@ -188,11 +189,11 @@ bool Badge::append(const String& id, size_t offset, const uint8_t* bytes, size_t
 
 bool Badge::commit(const String& id, String& error) {
     if(!mutex_) return false; Lock guard(mutex_);
-    if(id!=uploadId_ || id.isEmpty() || received_!=expected_) { error="Trasferimento Badge incompleto"; return false; }
+    if(id!=uploadId_ || id.isEmpty() || received_!=expected_) { error=i18n::text("Trasferimento Badge incompleto"); return false; }
     upload_.flush(); upload_.close();
     File file=LittleFS.open("/badge.upload","r");
     badge::Info next; String digest;
-    if(!file || !readInfo(file,next,digest) || digest!=expectedDigest_) { clearUpload(); error="Badge non valido"; return false; }
+    if(!file || !readInfo(file,next,digest) || digest!=expectedDigest_) { clearUpload(); error=i18n::text("Badge non valido"); return false; }
     mbedtls_sha256_context hash; mbedtls_sha256_init(&hash);
     bool ok=mbedtls_sha256_starts(&hash,0)==0 && file.seek(0);
     std::unique_ptr<uint8_t[]> bytes(new (std::nothrow) uint8_t[2048]);
@@ -205,9 +206,9 @@ bool Badge::commit(const String& id, String& error) {
     ok=ok && mbedtls_sha256_finish(&hash,result)==0 && hex(result,32)==digest;
     mbedtls_sha256_free(&hash);
     if(ok) { free(cached_); cached_=nullptr; cacheAttempted_=false; }
-    if(!ok || !decode(file,next.frames[0])) { file.close(); clearUpload(); error="Verifica Badge fallita: precedente conservato"; return false; }
+    if(!ok || !decode(file,next.frames[0])) { file.close(); clearUpload(); error=i18n::text("Verifica Badge fallita: precedente conservato"); return false; }
     file.close();
-    if(!LittleFS.rename("/badge.upload","/badge.bin")) { clearUpload(); error="Salvataggio Badge fallito"; return false; }
+    if(!LittleFS.rename("/badge.upload","/badge.bin")) { clearUpload(); error=i18n::text("Salvataggio Badge fallito"); return false; }
     info_=next; digest_=digest; error_=""; failed_=false; elapsed_=animationAt_=0; frame_=UINT16_MAX;
     clearUpload();
     suspend();

@@ -62,7 +62,7 @@ struct BadgeAsset: Sendable {
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
               width > 0, height > 0, width <= 20000, height <= 20000, width * height <= 64_000_000,
               CGImageSourceGetCount(source) <= 3000 else {
-            throw CompanionError.message("Immagine non valida o troppo grande. Scegli una foto o una GIF entro 25 MB.")
+            throw CompanionError.message(String(localized: "Immagine non valida o troppo grande. Scegli una foto o una GIF entro 25 MB.", bundle: AppLocalization.bundle))
         }
         return source
     }
@@ -75,10 +75,10 @@ struct BadgeAsset: Sendable {
             let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
             let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
             let seconds = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double) ?? 0.1
-            guard seconds.isFinite, seconds >= 0, seconds <= 15 else { throw CompanionError.message("Durata GIF non valida.") }
+            guard seconds.isFinite, seconds >= 0, seconds <= 15 else { throw CompanionError.message(String(localized: "Durata GIF non valida.", bundle: AppLocalization.bundle)) }
             values.append(max(20, Int((seconds == 0 ? 0.1 : seconds) * 1000)))
         }
-        if count > 1, values.reduce(0,+) > 15000 { throw CompanionError.message("La GIF può durare al massimo 15 secondi.") }
+        if count > 1, values.reduce(0,+) > 15000 { throw CompanionError.message(String(localized: "La GIF può durare al massimo 15 secondi.", bundle: AppLocalization.bundle)) }
         return values
     }
 
@@ -88,7 +88,7 @@ struct BadgeAsset: Sendable {
             kCGImageSourceShouldCacheImmediately: true]
         let selected=CGImageSourceGetType(source) as String? == UTType.gif.identifier ? index : CGImageSourceGetPrimaryImageIndex(source)
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, selected, options as CFDictionary) else {
-            throw CompanionError.message("Non riesco a leggere questa immagine.")
+            throw CompanionError.message(String(localized: "Non riesco a leggere questa immagine.", bundle: AppLocalization.bundle))
         }
         return image
     }
@@ -102,12 +102,12 @@ struct BadgeAsset: Sendable {
     static func prepare(_ data: Data, layout: BadgeLayout) throws -> BadgeAsset {
         guard layout.zoom.isFinite, (1...4).contains(layout.zoom), layout.offsetX.isFinite, layout.offsetY.isFinite,
               abs(layout.offsetX) <= 128, abs(layout.offsetY) <= 128, [5,10].contains(layout.framesPerSecond) else {
-            throw CompanionError.message("Ritaglio non valido.")
+            throw CompanionError.message(String(localized: "Ritaglio non valido.", bundle: AppLocalization.bundle))
         }
         let source = try source(data), delays = try delays(source)
         let duration = delays.count > 1 ? delays.reduce(0,+) : 1000
         let count = delays.count > 1 ? min(120, max(1, duration / (1000 / layout.framesPerSecond))) : 1
-        guard delays.count == 1 || count >= 2 else { throw CompanionError.message("Questa GIF è troppo breve per il display. Scegline una da almeno 0,4 secondi.") }
+        guard delays.count == 1 || count >= 2 else { throw CompanionError.message(String(localized: "Questa GIF è troppo breve per il display. Scegline una da almeno 0,4 secondi.", bundle: AppLocalization.bundle)) }
         var compressed: [Data] = [], previews: [BadgePreviewFrame] = [], lastPixels = Data()
         var sourceIndex = 0, sourceEnd = delays[0], payloadBytes = 0
         for index in 0..<count {
@@ -122,7 +122,7 @@ struct BadgeAsset: Sendable {
                 let encoded = try compress(pixels)
                 payloadBytes += encoded.count
                 guard 16 + (compressed.count+1)*12 + payloadBytes + 32 <= maxBytes else {
-                    throw CompanionError.message("Il Badge supera 3 MB. Prova 5 fotogrammi al secondo o una GIF più semplice.")
+                    throw CompanionError.message(String(localized: "Il Badge supera 3 MB. Prova 5 fotogrammi al secondo o una GIF più semplice.", bundle: AppLocalization.bundle))
                 }
                 compressed.append(encoded)
                 previews.append(BadgePreviewFrame(png: try preview(pixels), milliseconds: milliseconds))
@@ -144,24 +144,24 @@ struct BadgeAsset: Sendable {
     static func decode(_ data: Data) throws -> BadgeAsset {
         guard data.count >= 61, data.count <= maxBytes, data.prefix(4) == Data("SWB1".utf8),
               data.le16(4) == side, data.le16(6) == side, data.le16(10) == 0, data.le32(12) == data.count else {
-            throw CompanionError.message("Badge salvato non valido.")
+            throw CompanionError.message(String(localized: "Badge salvato non valido.", bundle: AppLocalization.bundle))
         }
         let count = data.le16(8)
-        guard (1...120).contains(count), 16+count*12+32 < data.count else { throw CompanionError.message("Badge incompleto.") }
+        guard (1...120).contains(count), 16+count*12+32 < data.count else { throw CompanionError.message(String(localized: "Badge incompleto.", bundle: AppLocalization.bundle)) }
         let hash = Data(SHA256.hash(data: data.dropLast(32)))
-        guard hash == data.suffix(32) else { throw CompanionError.message("Verifica del Badge fallita.") }
+        guard hash == data.suffix(32) else { throw CompanionError.message(String(localized: "Verifica del Badge fallita.", bundle: AppLocalization.bundle)) }
         var previews: [BadgePreviewFrame] = [], end = 16+count*12, duration = 0
         for index in 0..<count {
             try Task.checkCancellation()
             let offset = data.le32(16+index*12), bytes = data.le32(20+index*12), delay = data.le32(24+index*12)
             guard offset == end, bytes > 0, bytes <= rawBytes+65536, (100...15000).contains(delay), offset+bytes <= data.count-32 else {
-                throw CompanionError.message("Fotogramma Badge non valido.")
+                throw CompanionError.message(String(localized: "Fotogramma Badge non valido.", bundle: AppLocalization.bundle))
             }
-            duration += delay; guard duration <= 15000 else { throw CompanionError.message("Durata Badge non valida.") }
+            duration += delay; guard duration <= 15000 else { throw CompanionError.message(String(localized: "Durata Badge non valida.", bundle: AppLocalization.bundle)) }
             let pixels = try decompress(data.subdata(in: offset..<offset+bytes))
             previews.append(BadgePreviewFrame(png: try preview(pixels), milliseconds: delay)); end = offset+bytes
         }
-        guard end == data.count-32 else { throw CompanionError.message("Dati aggiuntivi nel Badge.") }
+        guard end == data.count-32 else { throw CompanionError.message(String(localized: "Dati aggiuntivi nel Badge.", bundle: AppLocalization.bundle)) }
         return BadgeAsset(data: data, previews: previews, digest: hash.map { String(format: "%02x",$0) }.joined())
     }
 
@@ -176,7 +176,7 @@ struct BadgeAsset: Sendable {
             context.draw(image,in: CGRect(x: rect.minX,y: Double(side)-rect.maxY,width: rect.width,height: rect.height))
             return true
         }
-        guard drawn else { throw CompanionError.message("Memoria insufficiente per l'immagine.") }
+        guard drawn else { throw CompanionError.message(String(localized: "Memoria insufficiente per l'immagine.", bundle: AppLocalization.bundle)) }
         var pixels = Data(count: rawBytes)
         rgba.withUnsafeBytes { input in pixels.withUnsafeMutableBytes { output in
             let from = input.bindMemory(to: UInt8.self), to = output.bindMemory(to: UInt8.self)
@@ -199,15 +199,15 @@ struct BadgeAsset: Sendable {
         } }
         guard let provider=CGDataProvider(data: rgba as CFData), let image=CGImage(width: side,height: side,bitsPerComponent: 8,bitsPerPixel: 32,bytesPerRow: side*4,
             space: CGColorSpace(name:CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
-            provider: provider,decode: nil,shouldInterpolate: true,intent: .defaultIntent) else { throw CompanionError.message("Anteprima non disponibile.") }
+            provider: provider,decode: nil,shouldInterpolate: true,intent: .defaultIntent) else { throw CompanionError.message(String(localized: "Anteprima non disponibile.", bundle: AppLocalization.bundle)) }
         return try png(image)
     }
 
     private static func png(_ image: CGImage) throws -> Data {
         let output=NSMutableData()
-        guard let destination=CGImageDestinationCreateWithData(output,UTType.png.identifier as CFString,1,nil) else { throw CompanionError.message("Anteprima non disponibile.") }
+        guard let destination=CGImageDestinationCreateWithData(output,UTType.png.identifier as CFString,1,nil) else { throw CompanionError.message(String(localized: "Anteprima non disponibile.", bundle: AppLocalization.bundle)) }
         CGImageDestinationAddImage(destination,image,nil)
-        guard CGImageDestinationFinalize(destination) else { throw CompanionError.message("Creazione anteprima fallita.") }
+        guard CGImageDestinationFinalize(destination) else { throw CompanionError.message(String(localized: "Creazione anteprima fallita.", bundle: AppLocalization.bundle)) }
         return output as Data
     }
 
@@ -216,7 +216,7 @@ struct BadgeAsset: Sendable {
         let result=input.withUnsafeBytes { source in output.withUnsafeMutableBytes { target in
             compress2(target.bindMemory(to: UInt8.self).baseAddress,&size,source.bindMemory(to: UInt8.self).baseAddress,uLong(input.count),6)
         } }
-        guard result==Z_OK else { throw CompanionError.message("Compressione Badge fallita.") }
+        guard result==Z_OK else { throw CompanionError.message(String(localized: "Compressione Badge fallita.", bundle: AppLocalization.bundle)) }
         output.count=Int(size); return output
     }
     private static func decompress(_ input: Data) throws -> Data {
@@ -224,7 +224,7 @@ struct BadgeAsset: Sendable {
         let result=input.withUnsafeBytes { source in output.withUnsafeMutableBytes { target in
             uncompress(target.bindMemory(to: UInt8.self).baseAddress,&size,source.bindMemory(to: UInt8.self).baseAddress,uLong(input.count))
         } }
-        guard result==Z_OK, size==rawBytes else { throw CompanionError.message("Fotogramma compresso non valido.") }
+        guard result==Z_OK, size==rawBytes else { throw CompanionError.message(String(localized: "Fotogramma compresso non valido.", bundle: AppLocalization.bundle)) }
         return output
     }
 }

@@ -27,12 +27,30 @@ struct NoteArchive {
     func saveAudio(_ data: Data, for note: VoiceNote) throws -> URL {
         guard note.valid, data.count == note.bytes, data.count >= 44,
               data.prefix(4) == Data("RIFF".utf8), data[8..<12] == Data("WAVE".utf8) else {
-            throw CompanionError.message("Audio non valido. L'originale è conservato sullo StopWatch.")
+            throw CompanionError.message(String(localized: "Audio non valido. L'originale è conservato sullo StopWatch.", bundle: AppLocalization.bundle))
         }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent(note.name)
         try data.write(to: url, options: .atomic)
         return url
+    }
+
+    func title(for note: VoiceNote) -> String? {
+        guard let audio = audioURL(for: note),
+              let value = try? String(contentsOf: audio.deletingPathExtension().appendingPathExtension("title"), encoding: .utf8),
+              !value.isEmpty, value.count <= 120, !value.contains(where: \.isNewline) else { return nil }
+        return value
+    }
+
+    func saveTitle(_ value: String, for note: VoiceNote) throws {
+        let title = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let audio = audioURL(for: note), title.count <= 120, !title.contains(where: \.isNewline) else {
+            throw CompanionError.message(String(localized: "Scarica prima la nota e scegli un titolo di massimo 120 caratteri su una sola riga.", bundle: AppLocalization.bundle))
+        }
+        let url = audio.deletingPathExtension().appendingPathExtension("title")
+        if title.isEmpty {
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        } else { try title.write(to: url, atomically: true, encoding: .utf8) }
     }
 
     func transcript(for note: VoiceNote) -> String? {
@@ -43,7 +61,7 @@ struct NoteArchive {
     func saveTranscript(_ text: String, for note: VoiceNote) throws {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let audio = audioURL(for: note), !text.isEmpty else {
-            throw CompanionError.message("Nessuna parola riconosciuta. Puoi riascoltare l'audio e riprovare.")
+            throw CompanionError.message(String(localized: "Nessuna parola riconosciuta. Puoi riascoltare l'audio e riprovare.", bundle: AppLocalization.bundle))
         }
         try text.write(to: audio.deletingPathExtension().appendingPathExtension("txt"), atomically: true, encoding: .utf8)
     }

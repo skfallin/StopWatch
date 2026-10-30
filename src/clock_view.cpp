@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "clock_view.h"
 #include "ui_drawing.h"
 #include <cmath>
@@ -7,10 +8,11 @@ namespace clock_ui {
 namespace {
 constexpr float radians=3.14159265358979323846f/180;
 const char* days[]={"DOM","LUN","MAR","MER","GIO","VEN","SAB"};
+const char* englishDays[]={"SUN","MON","TUE","WED","THU","FRI","SAT"};
 const char* months[]={"GEN","FEB","MAR","APR","MAG","GIU","LUG","AGO","SET","OTT","NOV","DIC"};
 String two(unsigned value) { char text[12];std::snprintf(text,sizeof(text),"%02u",value);return text; }
 String date(const tm& local) {
-    char text[32];std::snprintf(text,sizeof(text),"%s %d %s",days[local.tm_wday],local.tm_mday,months[local.tm_mon]);return text;
+    char text[32];std::snprintf(text,sizeof(text),"%s %d %s",(i18n::italian?days[local.tm_wday]:englishDays[local.tm_wday]),local.tm_mday,i18n::text(months[local.tm_mon]));return text;
 }
 String duration(uint64_t milliseconds) {
     const unsigned seconds=milliseconds/1000, hours=seconds/3600;
@@ -42,7 +44,7 @@ void tabs(M5Canvas& c,int selected) {
     const char* names[]={"Ora","Timer","Crono"};
     for(int i=0;i<3;++i) {
         if(i==selected) c.fillSmoothRoundRect(109+i*84,ui::clockTabsY-23,80,46,23,ui::accent);
-        ui::label(c,names[i],149+i*84,ui::clockTabsY,ui::Font::Small,i==selected?ui::ink:ui::white,i==selected?ui::accent:ui::surface,76);
+        ui::label(c,i18n::text(names[i]),149+i*84,ui::clockTabsY,ui::Font::Small,i==selected?ui::ink:ui::white,i==selected?ui::accent:ui::surface,76);
     }
 }
 void action(M5Canvas& c,int x,const char* label,bool primary) {
@@ -61,7 +63,7 @@ void hands(M5Canvas& c,const tm& t,bool glow) {
     c.fillSmoothCircle(233,233,2,ui::ink);
 }
 void digital(M5Canvas& c,const tm& t) {
-    ui::label(c,"ORA LOCALE",233,119,ui::Font::Small,ui::muted);
+    ui::label(c,i18n::text("ORA LOCALE"),233,119,ui::Font::Small,ui::muted);
     ui::label(c,two(t.tm_hour)+":"+two(t.tm_min),233,204,ui::Font::Number,ui::white,ui::black,366);
     c.fillSmoothRoundRect(179,264,108,56,28,ui::selectionSurface);
     ui::label(c,two(t.tm_sec),233,292,ui::Font::Title,ui::accent,ui::selectionSurface,96);
@@ -116,7 +118,7 @@ void segments(M5Canvas& c,const tm& t) {
 }
 }
 void menu(M5Canvas& c,int selected) {
-    header(c,"Orologio");
+    header(c,i18n::text("Orologio"));
     const char* titles[]={"Ora","Timer","Cronometro"};
     const ui::Icon icons[]={ui::Icon::Clock,ui::Icon::Timer,ui::Icon::Stopwatch};
     for(int i=0;i<3;++i) {
@@ -124,15 +126,15 @@ void menu(M5Canvas& c,int selected) {
         const uint32_t bg=i==selected?ui::selectionSurface:ui::surface;
         c.fillSmoothRoundRect(85,y,296,72,30,bg);
         ui::icon(c,icons[i],124,y+36,28,i==selected?ui::accent:ui::white,bg);
-        ui::label(c,titles[i],245,y+36,ui::Font::Label,ui::white,bg,218);
+        ui::label(c,i18n::text(titles[i]),245,y+36,ui::Font::Label,ui::white,bg,218);
     }
-    ui::label(c,"A scegli · B apri",233,413,ui::Font::Small,ui::muted,ui::black,240);
+    ui::label(c,i18n::text("A scegli · B apri"),233,413,ui::Font::Small,ui::muted,ui::black,240);
 }
 void watch(M5Canvas& c,clockwork::Face face,const tm& t,bool valid,bool controls) {
     if(!valid) {
         ui::icon(c,ui::Icon::Clock,233,185,72,ui::accent);
-        ui::label(c,"Ora non impostata",233,265,ui::Font::Label);
-        ui::label(c,"Collega iPhone o Wi-Fi",233,305,ui::Font::Small,ui::muted);
+        ui::label(c,i18n::text("Ora non impostata"),233,265,ui::Font::Label);
+        ui::label(c,i18n::text("Collega iPhone o Wi-Fi"),233,305,ui::Font::Small,ui::muted);
     } else switch(face) {
     case clockwork::Face::Digital: digital(c,t);break;
     case clockwork::Face::Analog: analog(c,t,false);break;
@@ -143,7 +145,7 @@ void watch(M5Canvas& c,clockwork::Face face,const tm& t,bool valid,bool controls
     }
     if(controls || !valid) {
         c.fillSmoothRoundRect(154,57,158,54,27,ui::black);
-        header(c,clockwork::faceNames[int(face)]);
+        header(c,i18n::text(clockwork::faceNames[int(face)]));
         ui::circleButton(c,{354,84,28},ui::Icon::Next,20,ui::surface,ui::white);
         tabs(c,0);
     }
@@ -163,41 +165,41 @@ void timer(M5Canvas& c,const clockwork::Timer& timer) {
                 if(y==143) c.drawWideLine(x,y-7,x,y+7,1.3f,ui::white);
             }
             ui::label(c,two(values[i]),x,207,ui::Font::Clock,ui::white,ui::black,90);
-            ui::label(c,units[i],x,252,ui::Font::Small,ui::muted,ui::black,80);
+            ui::label(c,i18n::text(units[i]),x,252,ui::Font::Small,ui::muted,ui::black,80);
         }
-        ui::pill(c,233,ui::clockActionY,200,"Avvia",ui::accent,ui::ink);
+        ui::pill(c,233,ui::clockActionY,200,i18n::text("Avvia"),ui::accent,ui::ink);
     } else {
         const bool done=timer.state()==State::Done;
         if(done) {
             c.fillSmoothCircle(233,208,102,ui::focus);
-            ui::label(c,"Tempo",233,187,ui::Font::Title,ui::ink,ui::focus,190);
+            ui::label(c,i18n::text("Tempo"),233,187,ui::Font::Title,ui::ink,ui::focus,190);
             ui::label(c,"scaduto",233,233,ui::Font::Title,ui::ink,ui::focus,190);
         } else {
             arc(c,102,1,ui::surface,208,4);
             arc(c,102,float(timer.remaining())/timer.duration(),ui::accent,208,4);
             const auto font=timer.remainingSeconds()>=3600?ui::Font::Title:ui::Font::Clock;
             ui::label(c,duration(uint64_t(timer.remainingSeconds())*1000),233,197,font,ui::white,ui::black,192);
-            ui::label(c,timer.state()==State::Running?"IN CORSO":"IN PAUSA",233,253,ui::Font::Small,ui::muted);
+            ui::label(c,timer.state()==State::Running?i18n::text("IN CORSO"):i18n::text("IN PAUSA"),233,253,ui::Font::Small,ui::muted);
         }
-        action(c,160,done?"Ripeti":timer.state()==State::Running?"Menu":"Azzera",false);
-        action(c,306,done?"OK":timer.state()==State::Running?"Pausa":"Riprendi",true);
+        action(c,160,done?i18n::text("Ripeti"):timer.state()==State::Running?"Menu":i18n::text("Azzera"),false);
+        action(c,306,done?"OK":timer.state()==State::Running?i18n::text("Pausa"):i18n::text("Riprendi"),true);
     }
     tabs(c,1);
 }
 void stopwatch(M5Canvas& c,const clockwork::Stopwatch& watch) {
     const bool limit=watch.elapsed()==clockwork::Stopwatch::maxElapsed;
-    header(c,"Cronometro");
+    header(c,i18n::text("Cronometro"));
     ui::label(c,duration(watch.elapsed()),233,170,ui::Font::Clock,ui::white,ui::black,358);
     ui::label(c,"."+two(watch.elapsed()/10%100),233,226,ui::Font::Title,ui::accent);
     if(watch.lapCount() && !limit) {
         for(size_t i=0;i<watch.lapCount();++i) {
             const auto& lap=watch.lap(i);
-            char name[24];std::snprintf(name,sizeof(name),"GIRO %02lu   ",static_cast<unsigned long>(lap.number));
+            char name[24];std::snprintf(name,sizeof(name),i18n::text("GIRO %02lu   "),static_cast<unsigned long>(lap.number));
             ui::label(c,String(name)+duration(lap.split)+"."+two(lap.split/10%100),233,261+i*21,ui::Font::Small,i?ui::muted:ui::white,ui::black,310);
         }
-    } else ui::label(c,limit?"LIMITE 100 ORE":watch.running()?"IN CORSO":watch.elapsed()?"IN PAUSA":"PRONTO",233,289,ui::Font::Small,ui::muted);
-    action(c,160,watch.running()?"Giro":"Azzera",false);
-    action(c,306,limit?"Menu":watch.running()?"Pausa":watch.elapsed()?"Riprendi":"Avvia",true);
+    } else ui::label(c,limit?i18n::text("LIMITE 100 ORE"):watch.running()?i18n::text("IN CORSO"):watch.elapsed()?i18n::text("IN PAUSA"):i18n::text("PRONTO"),233,289,ui::Font::Small,ui::muted);
+    action(c,160,watch.running()?i18n::text("Giro"):i18n::text("Azzera"),false);
+    action(c,306,limit?"Menu":watch.running()?i18n::text("Pausa"):watch.elapsed()?i18n::text("Riprendi"):i18n::text("Avvia"),true);
     tabs(c,2);
 }
 }

@@ -19,10 +19,12 @@ int main(int argc,char** argv) {
     const auto protectUsers=[] {
         LittleFS.files["/notes/note-0123456789abcdef.wav"]={1,2,3,4,5};
         LittleFS.files["/badge.bin"]={6,7,8,9};
+        LittleFS.files["/security-key.lfs"]={21,22,23};
     };
     const auto usersUnchanged=[] {
         assert((LittleFS.files.at("/notes/note-0123456789abcdef.wav")==std::vector<uint8_t>{1,2,3,4,5}));
         assert((LittleFS.files.at("/badge.bin")==std::vector<uint8_t>{6,7,8,9}));
+        assert((LittleFS.files.at("/security-key.lfs")==std::vector<uint8_t>{21,22,23}));
     };
     protectUsers();
 #ifdef SFX_SEED_ARCHIVE
@@ -53,7 +55,7 @@ int main(int argc,char** argv) {
     sfx::stop();
     M5.Speaker.playing=true;
     assert(!sfx::play(1,sfx::Cue::Select,200,true));M5.Speaker.playing=false;
-    assert(!sfx::play(0,sfx::Cue::Select,200,true) && !sfx::play(13,sfx::Cue::Select,200,true));
+    assert(!sfx::play(0,sfx::Cue::Select,200,true) && !sfx::play(sfx::packIds.size(),sfx::Cue::Select,200,true));
     assert(!sfx::play(1,sfx::Cue::Count,200,true) && !sfx::play(1,sfx::Cue::Select,0,true));
     fakeMillis+=100;assert(sfx::play(1,sfx::Cue::Select,200,false));
     ++fakeMillis;assert(!sfx::play(1,sfx::Cue::Select,200,false));
@@ -61,11 +63,14 @@ int main(int argc,char** argv) {
 
     LittleFS.files["/ui-sounds.bin"][100]^=0xff;
 #ifdef SFX_SEED_ARCHIVE
+    const std::vector<uint8_t> legacyAudio(1440941,0x5a);
+    LittleFS.files["/ui-sounds.bin"]=legacyAudio;
     LittleFS.renameFailure=true;LittleFS.writtenBytes=0;
     assert(!sfx::begin(1));assert(!LittleFS.exists("/ui-sounds.tmp"));usersUnchanged();
-    assert(LittleFS.files["/ui-sounds.bin"][100]!=audio[100]);
+    assert(LittleFS.files["/ui-sounds.bin"]==legacyAudio);
     LittleFS.renameFailure=false;LittleFS.writeLimit=LittleFS.writtenBytes+5000;
     assert(!sfx::begin(1) && !LittleFS.exists("/ui-sounds.tmp"));usersUnchanged();
+    assert(LittleFS.files["/ui-sounds.bin"]==legacyAudio);
     LittleFS.files.erase("/ui-sounds.bin");LittleFS.capacity=1000000;LittleFS.writeLimit=SIZE_MAX;LittleFS.writtenBytes=0;
     assert(!sfx::begin(1) && LittleFS.writtenBytes==0);usersUnchanged();
     LittleFS.capacity=8*1024*1024;
@@ -78,14 +83,16 @@ int main(int argc,char** argv) {
     failAudioAllocation=true;assert(!sfx::begin(1));failAudioAllocation=false;
     assert(sfx::begin(1));
     LittleFS.files["/notes/note-fedcba9876543210.wav.part"]={10,11};
+    LittleFS.files["/security-key.lfs"]={21,22,23};
     LittleFS.files["/notes/keep.txt"]={12};LittleFS.files["/badge.upload"]={13};
     LittleFS.removeFailure="/notes/note-0123456789abcdef.wav";
     assert(!archive::clearUserFiles(LittleFS) && LittleFS.files["/ui-sounds.bin"]==audio);
     LittleFS.removeFailure="";
     assert(archive::clearUserFiles(LittleFS));
     assert(LittleFS.files["/ui-sounds.bin"]==audio && LittleFS.files["/notes/keep.txt"]==std::vector<uint8_t>{12});
+    assert((LittleFS.files["/security-key.lfs"]==std::vector<uint8_t>{21,22,23}));
     assert(!LittleFS.exists("/badge.bin") && !LittleFS.exists("/badge.upload"));
     assert(!LittleFS.exists("/notes/note-0123456789abcdef.wav") && !LittleFS.exists("/notes/note-fedcba9876543210.wav.part"));
     sfx::prepare(0);sfx::stop();
-    std::cout<<"OK: 96 PCM identici, cache senza I/O, SHA-256, fallback, migrazione atomica e conservazione dei file utente\n";
+    std::cout<<"OK: "<<(sfx::packIds.size()-1)*unsigned(sfx::Cue::Count)<<" PCM identici, cache senza I/O, SHA-256, fallback, migrazione atomica e conservazione dei file utente\n";
 }

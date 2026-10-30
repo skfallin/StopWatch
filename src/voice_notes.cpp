@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "voice_notes.h"
 #include "user_archive.h"
 #include <LittleFS.h>
@@ -70,7 +71,7 @@ void VoiceNotes::recover() {
     }
     root.close();
     for (const auto& partial : partials) {
-        if (!finishFile(partial)) message_ = "Nota interrotta: recupero non riuscito";
+        if (!finishFile(partial)) message_ = i18n::text("Nota interrotta: recupero non riuscito");
     }
 }
 
@@ -92,14 +93,14 @@ void VoiceNotes::fail(const String& error) {
 bool VoiceNotes::start() {
     if (busy()) return false;
     finishedEvent_ = succeeded_ = false;
-    if (!mounted_) { fail("Inizializza l'archivio in Diagnostica"); return false; }
-    if (count() >= policy::maxNotes) { fail("Archivio pieno: scarica e rimuovi note"); return false; }
+    if (!mounted_) { fail(i18n::text("Inizializza l'archivio in Diagnostica")); return false; }
+    if (count() >= policy::maxNotes) { fail(i18n::text("Archivio pieno: scarica e rimuovi note")); return false; }
     if (LittleFS.totalBytes() - LittleFS.usedBytes() < policy::maxSamples * 2 + 65536) {
-        fail("Spazio insufficiente: scarica e rimuovi note"); return false;
+        fail(i18n::text("Spazio insufficiente: scarica e rimuovi note")); return false;
     }
-    if (!warmMicrophone()) { fail("Microfono non disponibile"); return false; }
+    if (!warmMicrophone()) { fail(i18n::text("Microfono non disponibile")); return false; }
     samples_ = static_cast<int16_t*>(heap_caps_malloc(policy::maxSamples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!samples_) { fail("PSRAM insufficiente per registrare"); return false; }
+    if (!samples_) { fail(i18n::text("PSRAM insufficiente per registrare")); return false; }
     char name[48];
     do {
         snprintf(name, sizeof(name), "/notes/note-%08lx%08lx.wav.part", (unsigned long)esp_random(), (unsigned long)esp_random());
@@ -108,7 +109,7 @@ bool VoiceNotes::start() {
     file_ = LittleFS.open(partial_, "w");
     const auto header = policy::wavHeader(0);
     if (!file_ || file_.write(header.data(), header.size()) != header.size()) {
-        release(); fail("Impossibile creare la nota"); return false;
+        release(); fail(i18n::text("Impossibile creare la nota")); return false;
     }
     file_.flush();
     written_ = 0;
@@ -119,7 +120,7 @@ bool VoiceNotes::start() {
     requested_.store(true);
     preparedAt_ = millis();
     state_ = State::Preparing;
-    message_ = "Preparo il microfono: attendi REC";
+    message_ = i18n::text("Preparo il microfono: attendi REC");
     return true;
 }
 
@@ -147,7 +148,7 @@ void VoiceNotes::stop() {
         release();
         LittleFS.remove(partial_);
         state_ = State::Idle;
-        message_ = "Registrazione annullata prima di REC";
+        message_ = i18n::text("Registrazione annullata prima di REC");
     }
 }
 
@@ -169,10 +170,10 @@ void VoiceNotes::update() {
         uint32_t(millis() - preparedAt_) >= 100) {
         M5.Mic.setBufferReleaseCallback(this, onBuffer);
         if (!M5.Mic.record(samples_, chunkSamples, policy::sampleRate)) {
-            release(); state_ = State::Idle; fail("Avvio registrazione fallito"); return;
+            release(); state_ = State::Idle; fail(i18n::text("Avvio registrazione fallito")); return;
         }
         state_ = State::Recording;
-        message_ = "REC - parla, rilascia B per salvare";
+        message_ = i18n::text("REC - parla, rilascia B per salvare");
     }
     if (state_ != State::Recording && state_ != State::Saving) return;
     const size_t completed = completed_.load(std::memory_order_acquire);
@@ -187,7 +188,7 @@ void VoiceNotes::update() {
             file_.close();
             finishFile(partial_);
             release(); state_ = State::Idle;
-            fail("Scrittura interrotta: audio recuperabile conservato"); return;
+            fail(i18n::text("Scrittura interrotta: audio recuperabile conservato")); return;
         }
     }
     if (captureFinished_.load(std::memory_order_acquire)) {
@@ -195,9 +196,9 @@ void VoiceNotes::update() {
         if (written_ != completed_.load()) return;
         release();
         state_ = State::Idle;
-        if (!finishFile(partial_)) { fail("Audio conservato, finalizzazione fallita"); return; }
+        if (!finishFile(partial_)) { fail(i18n::text("Audio conservato, finalizzazione fallita")); return; }
         succeeded_ = !captureError_.load();
-        message_ = succeeded_ ? "Nota salvata sul dispositivo" : "Nota parziale salvata: errore microfono";
+        message_ = succeeded_ ? i18n::text("Nota salvata sul dispositivo") : i18n::text("Nota parziale salvata: errore microfono");
         finishedEvent_ = true;
         warmMicrophone();
     }

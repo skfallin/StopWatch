@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "portal.h"
 #include "portal_page.h"
 #include <LittleFS.h>
@@ -22,20 +23,20 @@ bool Portal::authorized(bool mutation) {
     server_.sendHeader("X-Content-Type-Options", "nosniff");
     server_.sendHeader("X-Frame-Options", "DENY");
     if (!active_ || !server_.authenticate("stopwatch", password_.c_str())) {
-        server_.requestAuthentication(BASIC_AUTH, "StopWatch", "Usa stopwatch e il codice sul display");
+        server_.requestAuthentication(BASIC_AUTH, "StopWatch", i18n::text("Usa stopwatch e il codice sul display"));
         return false;
     }
     if (mutation && (server_.header("X-StopWatch") != "1" || !server_.header("Content-Type").startsWith("application/json"))) {
-        error(403, "Richiesta non consentita"); return false;
+        error(403, i18n::text("Richiesta non consentita")); return false;
     }
-    if (notes_.busy()) { error(409, "Registrazione in corso: riprova dopo il salvataggio"); return false; }
+    if (notes_.busy()) { error(409, i18n::text("Registrazione in corso: riprova dopo il salvataggio")); return false; }
     return true;
 }
 
 bool Portal::jsonBody(JsonDocument& document) {
     if (body_.isEmpty() || body_.length() > policy::maxConfigBytes ||
         deserializeJson(document, body_) || !document.is<JsonObject>()) {
-        error(400, "JSON non valido o troppo grande"); return false;
+        error(400, i18n::text("JSON non valido o troppo grande")); return false;
     }
     return true;
 }
@@ -46,7 +47,7 @@ void Portal::collectBody() {
         body_ = "";
         server_.client().setTimeout(250);
         if (server_.clientContentLength() <= 0 || size_t(server_.clientContentLength()) > policy::maxConfigBytes) {
-            error(413, "Richiesta troppo grande");
+            error(413, i18n::text("Richiesta troppo grande"));
             server_.client().stop();
         } else if (!authorized(true)) server_.client().stop();
     } else if (raw.status == RAW_WRITE) {
@@ -119,13 +120,13 @@ void Portal::routes() {
     });
     server_.on("/api/config", HTTP_PUT, [this] {
         if (!authorized(true)) return;
-        if (!canSave_()) { error(409, "Attendi la richiesta Home Assistant"); return; }
+        if (!canSave_()) { error(409, i18n::text("Attendi la richiesta Home Assistant")); return; }
         JsonDocument data;
         if (!jsonBody(data)) return;
         Settings next = settings_;
         String reason;
         if (!next.update(data.as<JsonObjectConst>(), reason)) { error(400, reason); return; }
-        if (!next.save()) { error(500, "Salvataggio non riuscito: configurazione precedente conservata"); return; }
+        if (!next.save()) { error(500, i18n::text("Salvataggio non riuscito: configurazione precedente conservata")); return; }
         settings_ = next;
         server_.send(200, "application/json", "{\"saved\":true}");
         onSaved_();
@@ -134,9 +135,9 @@ void Portal::routes() {
         if (!authorized(true)) return;
         JsonDocument data;
         if (!jsonBody(data)) return;
-        if (!data["epoch"].is<int64_t>()) { error(400, "Ora non valida"); return; }
+        if (!data["epoch"].is<int64_t>()) { error(400, i18n::text("Ora non valida")); return; }
         const int64_t epoch = data["epoch"].as<int64_t>();
-        if (epoch < 1704067200 || epoch > 4102444800LL) { error(400, "Ora fuori intervallo"); return; }
+        if (epoch < 1704067200 || epoch > 4102444800LL) { error(400, i18n::text("Ora fuori intervallo")); return; }
         timeval now{time_t(epoch), 0};
         settimeofday(&now, nullptr);
         tm utc{}; gmtime_r(&now.tv_sec, &utc);
@@ -163,16 +164,16 @@ void Portal::routes() {
         if (!authorized()) return;
         const String name = server_.arg("name"), offsetText = server_.arg("offset");
         if (!policy::noteFilename(name.c_str()) || offsetText.isEmpty() || offsetText.length() > 7) {
-            error(400, "Nome o posizione non validi"); return;
+            error(400, i18n::text("Nome o posizione non validi")); return;
         }
-        for (char c : offsetText) if (c < '0' || c > '9') { error(400, "Posizione non valida"); return; }
+        for (char c : offsetText) if (c < '0' || c > '9') { error(400, i18n::text("Posizione non valida")); return; }
         File file = notes_.ready() ? LittleFS.open(String("/notes/") + name, "r") : File{};
         const size_t offset = offsetText.toInt();
-        if (!file) { error(404, "Nota non trovata"); return; }
-        if (offset >= file.size() || !file.seek(offset)) { error(416, "Posizione fuori dal file"); return; }
+        if (!file) { error(404, i18n::text("Nota non trovata")); return; }
+        if (offset >= file.size() || !file.seek(offset)) { error(416, i18n::text("Posizione fuori dal file")); return; }
         static uint8_t buffer[4096];
         const size_t bytes = file.read(buffer, std::min(sizeof(buffer), file.size() - offset));
-        if (!bytes) { error(500, "Lettura audio fallita"); return; }
+        if (!bytes) { error(500, i18n::text("Lettura audio fallita")); return; }
         server_.setContentLength(bytes);
         server_.send(200, "application/octet-stream", "");
         server_.sendContent(reinterpret_cast<const char*>(buffer), bytes);
@@ -182,9 +183,9 @@ void Portal::routes() {
         JsonDocument data;
         if (!jsonBody(data)) return;
         const String name = data["name"] | "";
-        if (!policy::noteFilename(name.c_str())) { error(400, "Nome nota non valido"); return; }
-        if (!notes_.ready() || !LittleFS.remove(String("/notes/") + name)) { error(404, "Nota non trovata"); return; }
+        if (!policy::noteFilename(name.c_str())) { error(400, i18n::text("Nome nota non valido")); return; }
+        if (!notes_.ready() || !LittleFS.remove(String("/notes/") + name)) { error(404, i18n::text("Nota non trovata")); return; }
         server_.send(200, "application/json", "{\"deleted\":true}");
     }, [this] { collectBody(); });
-    server_.onNotFound([this] { if (authorized()) error(404, "Pagina non trovata"); });
+    server_.onNotFound([this] { if (authorized()) error(404, i18n::text("Pagina non trovata")); });
 }

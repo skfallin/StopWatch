@@ -35,14 +35,14 @@ struct BadgePage: View {
                 do {
                     guard let url=try result.get().first else { return }
                     let access=url.startAccessingSecurityScopedResource();defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max)<=25*1024*1024 else { throw CompanionError.message("Il file supera 25 MB.") }
+                    guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max)<=25*1024*1024 else { throw CompanionError.message(String(localized: "Il file supera 25 MB.", bundle: AppLocalization.bundle)) }
                     await importImage(try Data(contentsOf: url))
                 } catch { self.error=error.localizedDescription }
             }
         }
         .task(id: photo) {
             guard let photo else { return }
-            do { guard let data=try await photo.loadTransferable(type: Data.self) else { throw CompanionError.message("Immagine non disponibile.") };await importImage(data) }
+            do { guard let data=try await photo.loadTransferable(type: Data.self) else { throw CompanionError.message(String(localized: "Immagine non disponibile.", bundle: AppLocalization.bundle)) };await importImage(data) }
             catch is CancellationError { }
             catch { self.error=error.localizedDescription }
         }
@@ -72,46 +72,46 @@ struct BadgePage: View {
     PaperCard {
         HStack {
             VStack(alignment: .leading,spacing: 6) {
-                Text("IL TUO BADGE").font(.caption.weight(.medium)).tracking(1.4).foregroundStyle(Palette.secondary)
-                Text("Fallo tuo.").font(.title.weight(.medium))
+                Text(String(localized: "IL TUO BADGE", bundle: AppLocalization.bundle)).font(.caption.weight(.medium)).tracking(1.4).foregroundStyle(Palette.secondary)
+                Text(String(localized: "Fallo tuo.", bundle: AppLocalization.bundle)).font(.title.weight(.medium))
             }
             Spacer()
             Image(systemName: "photo.on.rectangle.angled").font(.title2).accessibilityHidden(true)
         }
         BadgePreview(asset: readyAsset,source: source,layout: $layout)
             .overlay(alignment: .bottom) {
-                if preparing { ProgressView("Preparo…").font(.caption).tint(.white).padding(12).background(.black.opacity(0.8),in: Capsule()).padding(.bottom,20) }
+                if preparing { ProgressView(String(localized: "Preparo…", bundle: AppLocalization.bundle)).font(.caption).tint(.white).padding(12).background(.black.opacity(0.8),in: Capsule()).padding(.bottom,20) }
             }
         HStack {
-            Label(readyAsset?.animated == true ? "GIF animata" : "Immagine",systemImage: readyAsset?.animated == true ? "play.circle" : "photo")
+            Label(readyAsset?.animated == true ? String(localized: "GIF animata", bundle: AppLocalization.bundle) : String(localized: "Immagine", bundle: AppLocalization.bundle),systemImage: readyAsset?.animated == true ? "play.circle" : "photo")
             Spacer()
             Text("466 × 466").monospacedDigit()
         }.font(.caption).foregroundStyle(Palette.secondary)
         if let asset = readyAsset {
-            Text("\(asset.previews.count) fotogramm\(asset.previews.count == 1 ? "a" : "i") · \(ByteCountFormatter.string(fromByteCount: Int64(asset.data.count),countStyle: .file))" +
+            Text(String(format: asset.previews.count == 1 ? String(localized: "%d fotogramma · %@", bundle: AppLocalization.bundle) : String(localized: "%d fotogrammi · %@", bundle: AppLocalization.bundle), asset.previews.count, ByteCountFormatter.string(fromByteCount: Int64(asset.data.count), countStyle: .file)) +
                  (asset.animated ? String(format: " · %.1f s",Double(asset.milliseconds)/1000) : ""))
                 .font(.caption).foregroundStyle(Palette.secondary)
         }
         PhotosPicker(selection: $photo,matching: .images,photoLibrary: .shared()) {
-            Label(source == nil && asset == nil ? "Scegli foto o GIF" : "Cambia immagine",systemImage: "photo.badge.plus")
+            Label(source == nil && asset == nil ? String(localized: "Scegli foto o GIF", bundle: AppLocalization.bundle) : String(localized: "Cambia immagine", bundle: AppLocalization.bundle),systemImage: "photo.badge.plus")
                 .font(.headline).frame(maxWidth: .infinity).padding(.vertical,15)
                 .foregroundStyle(.white).background(Palette.ink,in: Capsule())
         }.buttonStyle(.plain).disabled(upload != nil)
-        Button { importer = true } label: { Label("Scegli da File",systemImage: "folder").frame(maxWidth: .infinity,minHeight: 44) }
+        Button { importer = true } label: { Label(String(localized: "Scegli da File", bundle: AppLocalization.bundle),systemImage: "folder").frame(maxWidth: .infinity,minHeight: 44) }
             .buttonStyle(.plain).disabled(upload != nil)
         if source != nil {
-            Picker("Inquadratura",selection: $layout.fit) {
-                Text("Riempi").tag(false); Text("Immagine intera").tag(true)
+            Picker(String(localized: "Inquadratura", bundle: AppLocalization.bundle),selection: $layout.fit) {
+                Text(String(localized: "Riempi", bundle: AppLocalization.bundle)).tag(false); Text(String(localized: "Immagine intera", bundle: AppLocalization.bundle)).tag(true)
             }.pickerStyle(.segmented).disabled(upload != nil)
             HStack {
-                Text("Pizzica e trascina per inquadrare.").font(.caption).foregroundStyle(Palette.secondary)
+                Text(String(localized: "Pizzica e trascina per inquadrare.", bundle: AppLocalization.bundle)).font(.caption).foregroundStyle(Palette.secondary)
                 Spacer()
-                Button("Ripristina") { let rate=layout.framesPerSecond;layout=BadgeLayout();layout.framesPerSecond=rate }
+                Button(String(localized: "Ripristina", bundle: AppLocalization.bundle)) { let rate=layout.framesPerSecond;layout=BadgeLayout();layout.framesPerSecond=rate }
                     .font(.caption).frame(minHeight: 44).disabled(upload != nil)
             }
             if source?.animated == true {
-                Picker("Animazione",selection: $layout.framesPerSecond) {
-                    Text("Eco · 5 fps").tag(5);Text("Fluida · 10 fps").tag(10)
+                Picker(String(localized: "Animazione", bundle: AppLocalization.bundle),selection: $layout.framesPerSecond) {
+                    Text(String(localized: "Eco · 5 fps", bundle: AppLocalization.bundle)).tag(5);Text(String(localized: "Fluida · 10 fps", bundle: AppLocalization.bundle)).tag(10)
                 }.pickerStyle(.segmented).disabled(upload != nil)
             }
         }
@@ -120,20 +120,20 @@ struct BadgePage: View {
 
     private var sendCard: some View {
     PaperCard {
-        Text("Pronto da indossare.").font(.title2.weight(.medium))
-        Text("L'anteprima usa gli stessi fotogrammi e colori che invieremo al display. GIF fino a 15 secondi e 3 MB dopo la preparazione.")
+        Text(String(localized: "Pronto da indossare.", bundle: AppLocalization.bundle)).font(.title2.weight(.medium))
+        Text(String(localized: "L'anteprima usa gli stessi fotogrammi e colori che invieremo al display. GIF fino a 15 secondi e 3 MB dopo la preparazione.", bundle: AppLocalization.bundle))
             .font(.subheadline).foregroundStyle(Palette.secondary)
         if let message = preparationError ?? error { Label(message,systemImage: "exclamationmark.circle").font(.subheadline).foregroundStyle(.red) }
                 if let message=remote?.error, !message.isEmpty { Label(message,systemImage:"exclamationmark.circle").font(.subheadline).foregroundStyle(.red) }
         if connection.ready && connection.status?.badge == nil {
-            Label("Aggiorna il firmware dello StopWatch per usare Badge.",systemImage: "arrow.down.circle").font(.subheadline).foregroundStyle(Palette.secondary)
+            Label(String(localized: "Aggiorna il firmware dello StopWatch per usare Badge.", bundle: AppLocalization.bundle),systemImage: "arrow.down.circle").font(.subheadline).foregroundStyle(Palette.secondary)
         }
         if let issue=connection.badgeTransferIssue {
-            Label("Wi-Fi non riuscito: \(issue) Invio tramite Bluetooth.",systemImage:"wifi.exclamationmark")
+            Label(String(localized: "Wi-Fi non riuscito: \(issue) Invio tramite Bluetooth.", bundle: AppLocalization.bundle),systemImage:"wifi.exclamationmark")
                 .font(.caption).foregroundStyle(Palette.secondary)
         }
         if let seconds=connection.badgeTransferSeconds {
-            Label(String(format:"Ultimo invio: %@ · %.1f s",connection.badgeTransferMethod,seconds),systemImage:"checkmark.circle")
+            Label(String(format:String(localized: "Ultimo invio: %@ · %.1f s", bundle: AppLocalization.bundle),connection.badgeTransferMethod,seconds),systemImage:"checkmark.circle")
                 .font(.caption).foregroundStyle(Palette.secondary)
         }
         if let progress = connection.badgeProgress {
@@ -141,7 +141,7 @@ struct BadgePage: View {
             HStack {
                 Text(connection.badgeTransferDetail).font(.caption)
                 Spacer()
-                Button("Annulla") { upload?.cancel() }.font(.caption).frame(minHeight: 44)
+                Button(String(localized: "Annulla", bundle: AppLocalization.bundle)) { upload?.cancel() }.font(.caption).frame(minHeight: 44)
             }
         } else {
             Button {
@@ -154,26 +154,26 @@ struct BadgePage: View {
                     upload=nil
                 }
             } label: {
-                HStack { Text(sent && remote?.digest == readyAsset?.digest ? "Badge inviato" : "Invia allo StopWatch"); Spacer(); Image(systemName: "arrow.up.right") }
+                HStack { Text(sent && remote?.digest == readyAsset?.digest ? String(localized: "Badge inviato", bundle: AppLocalization.bundle) : String(localized: "Invia allo StopWatch", bundle: AppLocalization.bundle)); Spacer(); Image(systemName: "arrow.up.right") }
                     .font(.headline).padding(.vertical,15).padding(.horizontal,20)
                     .foregroundStyle(.white).background(Palette.ink,in: Capsule())
             }.buttonStyle(.plain).disabled(readyAsset == nil || preparing || !connection.ready || connection.status?.badge == nil || connection.working)
                 .opacity(readyAsset == nil || !connection.ready ? 0.45 : 1)
         }
-        Button { connection.output("badge.show") } label: { Label("Mostra sul display",systemImage: "circle.inset.filled").frame(maxWidth: .infinity,minHeight: 44) }
+        Button { connection.output("badge.show") } label: { Label(String(localized: "Mostra sul display", bundle: AppLocalization.bundle),systemImage: "circle.inset.filled").frame(maxWidth: .infinity,minHeight: 44) }
             .buttonStyle(.plain).disabled(!connection.ready || connection.working || remote?.available != true)
-        if !connection.ready { Text("Puoi prepararlo ora e inviarlo quando lo StopWatch sarà collegato.").font(.caption).foregroundStyle(Palette.secondary) }
+        if !connection.ready { Text(String(localized: "Puoi prepararlo ora e inviarlo quando lo StopWatch sarà collegato.", bundle: AppLocalization.bundle)).font(.caption).foregroundStyle(Palette.secondary) }
     }
     }
 
     private var behaviorCard: some View {
     PaperCard {
-        Label("Si mantiene dritto.",systemImage: "gyroscope").font(.title3.weight(.medium))
-        Text("L'IMU segue i movimenti. Quando ti fermi, i sensori rallentano e una foto non viene ridisegnata inutilmente.")
+        Label(String(localized: "Si mantiene dritto.", bundle: AppLocalization.bundle),systemImage: "gyroscope").font(.title3.weight(.medium))
+        Text(String(localized: "L'IMU segue i movimenti. Quando ti fermi, i sensori rallentano e una foto non viene ridisegnata inutilmente.", bundle: AppLocalization.bundle))
             .font(.subheadline).foregroundStyle(Palette.secondary)
         NavigationLink {
             if let configuration=connection.configuration { ConfigurationEditor(part: .badge,configuration: configuration) }
-        } label: { HStack { Text("Rotazione e risparmio energetico");Spacer();Image(systemName: "chevron.right") }.font(.subheadline).frame(minHeight:44) }
+        } label: { HStack { Text(String(localized: "Rotazione e risparmio energetico", bundle: AppLocalization.bundle));Spacer();Image(systemName: "chevron.right") }.font(.subheadline).frame(minHeight:44) }
             .buttonStyle(.plain).disabled(!connection.ready || connection.working || connection.status?.badge == nil)
     }
     }
@@ -222,7 +222,7 @@ private struct BadgePreview: View {
                 .onEnded { value in if source != nil { layout.offsetX=min(128,max(-128,layout.offsetX+Double(value.translation.width/side)));layout.offsetY=min(128,max(-128,layout.offsetY+Double(value.translation.height/side))) } })
             .simultaneousGesture(MagnificationGesture().updating($magnification) { value,state,_ in if source != nil { state=value } }
                 .onEnded { value in if source != nil { layout.zoom=min(4,max(1,layout.zoom*Double(value))) } })
-            .accessibilityLabel("Anteprima circolare del Badge")
+            .accessibilityLabel(String(localized: "Anteprima circolare del Badge", bundle: AppLocalization.bundle))
         }.aspectRatio(1,contentMode:.fit)
     }
 

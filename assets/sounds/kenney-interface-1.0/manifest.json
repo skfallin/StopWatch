@@ -1,0 +1,26 @@
+{
+  "pack": "microclick",
+  "source": "https://kenney.nl/assets/interface-sounds",
+  "version": "1.0",
+  "author": "Kenney",
+  "license": "CC0-1.0",
+  "cues": {
+    "Select": "click_003.ogg",
+    "Open": "open_001.ogg",
+    "Back": "back_001.ogg",
+    "Success": "select_001.ogg",
+    "Error": "error_001.ogg",
+    "Warning": "error_001.ogg",
+    "Complete": "confirmation_001.ogg",
+    "Volume": "click_001.ogg"
+  },
+  "sha256": {
+    "click_003.ogg": "2fa929138bc3a0f432696588f66eac94b8f6d463905ec8808c6461ce4b054292",
+    "click_001.ogg": "ccfb7fa0cccdd9faec0eb16033c732b1e308d139d80f799161495d58f7adcdb9",
+    "select_001.ogg": "aec0c31ea934a35936ae0d2ab8fac8123c93aa5647f935853a58dbaf90278b7a",
+    "back_001.ogg": "07db973f79f6ae0f2edc34561e7592e24d0577455919fb602cb8ecc0da991dcf",
+    "open_001.ogg": "a27c6bb0df7da1e6af5dd5937593c98bc58b6e513f42fe6a3254cd6a6949c648",
+    "confirmation_001.ogg": "063564703b6094d70718a3e787a55cc9141611e4ecd6b6637f8828f79b4a8c3a",
+    "error_001.ogg": "46e67425d16339772e8d328fb36a49426c9467418686e11beeb71ff84b0f6433"
+  }
+}

@@ -1,31 +1,50 @@
-# Stato del progetto
+# Public beta status
 
-## Versioni sorgenti
+[Italiano](STATUS.it.md)
 
-| Componente | Versione |
-|---|---|
-| Firmware | 0.12.0 |
-| Companion iOS | 0.6.0, build 15 |
-| Protocollo BLE | 1 |
+Candidate: firmware **0.18.0-beta.1**, Companion **0.9.0 / build 22**, BLE protocol **1**. This describes the source candidate, not a published binary or signed app.
 
-## Disponibile
+## Beta scope
 
-- Orbita + Focus, touch e pulsanti, impostazioni, diagnostica e Non disturbare.
-- Preferiti Home Assistant, conferme dei comandi, MQTT discovery e ponte Bluetooth tramite iPhone.
-- Spotify: lettore attivo, copertina, riproduzione, brani, playlist e dispositivi.
-- Note offline, ricezione nell’app e trascrizione locale italiana quando disponibile.
-- Badge con foto/GIF, trasferimento HTTPS/BLE e orientamento automatico o manuale.
-- Sei quadranti, timer, cronometro e impostazioni Orologio nel Companion.
-- CPU adattiva e display dell’orologio sempre acceso con attenuazione della luminosità.
+C152 only. English/Italian firmware, local portal and Companion; configurable device time zone; separate on-device transcription language; clock/timer/stopwatch/Focus, notes, Badge, USB Bridge/Slide and optional Home Assistant/Spotify. New configurations start English/UTC; existing stored configurations preserve Italian/Rome. Previous paired iPhone installations keep their Italian speech/keyboard defaults.
 
-## Evidenza e limiti
+The normal build disables FIDO. `stopwatch-lab` is an explicit test-only variant. No Android client, App Store/TestFlight distribution, Companion OTA or generic iOS notifications are promised.
 
-Durante la preparazione della repository, il 26 ottobre 2026, sono stati verificati: compilazione firmware; suite host C++/Python; 16 test dei blueprint Home Assistant; 33 test Swift; interoperabilità del Badge esportato dall’encoder Swift e letto dal parser C++; archivio audio sia nel percorso normale sia nell’installer. Tutti questi controlli sono passati. I comandi ripetibili sono in [DEVELOPMENT.md](DEVELOPMENT.md). Non è stato eseguito un caricamento sul dispositivo durante la pubblicazione del repository.
+## Local verification — 30 October 2026
 
-Prima della preparazione del repository, il firmware 0.12.0 e il Companion 0.6.0 compilavano e i 33 test Swift passavano. I test host coprivano la politica CPU, la compatibilità della configurazione, il dimming, il protocollo, i comandi Casa e la scelta del trasporto. L’utente ha confermato sul dispositivo la selezione del quadrante e il display dell’orologio sempre acceso con attenuazione e risposta al tocco.
+- Normal and LAB firmware builds passed, using pinned dependencies.
+- Sound installer build passed; runtime and installer host tests passed, including atomic replacement, corruption/failure paths and preservation of user files.
+- C++/Python suite passed, including navigation, power policy, commands, protocol validation, blueprints and regional defaults/migration/DST checks.
+- **45 Swift tests passed**, including English/Italian resource formatting and regional settings compatibility.
+- Unsigned iOS simulator build passed. Compiler-extracted localization keys were checked against generated resources.
+- Firmware host render: **76 Scene views in each language, no truncated labels**; clock and Focus views were also rendered. This is not a physical screen or iOS visual test.
+- Build and full checks also passed in a source-only snapshot of intended Git files, reusing only external toolchain/library caches.
+- Portal browser checks with synthetic data passed: English/Italian switching, regional-setting save and persistence after reload.
+- Working files and reachable local Git history passed the narrow high-confidence secret-pattern check. This is not an exhaustive audit of every possible secret or personal datum.
 
-Il ponte Casa/Spotify con iPhone bloccato era stato verificato fisicamente con firmware 0.11.2. Dopo le modifiche 0.12.0 i relativi controlli software passavano, ma la nuova prova fisica completa e la misura della CPU a schermo acceso non erano state concluse. Non è stata misurata l’autonomia in ore né una percentuale di risparmio energetico.
+No firmware was flashed, no account credentials were enrolled, no app was distributed and no repository visibility was changed as part of this preparation. No iOS simulator was running for an interactive visual check. Remote CI results for each pushed revision are available in [GitHub Actions](https://github.com/skfallin/StopWatch/actions); the local results above do not certify remote CI.
 
-**Ultimo stato noto del dispositivo nella sessione precedente:** era installata una build temporanea di prova con Wi-Fi spento. Il ripristino del firmware normale era rimasto in attesa del collegamento USB. Il sorgente in questo repository contiene invece il Wi-Fi automatico normale. Non dedurre dal contenuto del repository quale build sia attualmente sul dispositivo: verificarlo prima di un nuovo collaudo.
+## Before tagging/publishing
 
-Non sono implementati una tastiera remota generica, notifiche iOS generiche, integrazione Grok o aggiornamento OTA dal Companion. La presenza degli slot OTA nella tabella delle partizioni non costituisce un updater.
+- [ ] Review and commit the intended source files, including currently untracked vendored code, notices and generated resources. Recheck the exact committed revision.
+- [ ] Complete physical C152 + iPhone checks below and record the tested versions.
+- [ ] Enable GitHub private vulnerability reporting and review repository metadata, old assets and any remote logs/artifacts.
+- [ ] Run the committed revision through remote CI; build release artifacts/checksums from that revision.
+- [ ] Publish explicitly when approved. Do not describe a build-only check as hardware validation.
+
+## Hardware checklist
+
+Use synthetic content and test accounts. Export important notes first.
+
+- [ ] New device: English/UTC; choose Italian and another time zone through both Companion and portal, then reboot and confirm persistence.
+- [ ] Upgrade: previous Italian/Rome configuration, notes, Badge, audio pack and BLE bonds preserved; no erase/uploadfs.
+- [ ] Both languages: launcher, settings, recording/errors, pairing, portal and Companion at normal/large text sizes; no clipped critical controls.
+- [ ] Record/play a note, download via HTTPS and BLE, transcribe with supported English and Italian models; denied permission/model unavailable preserves audio.
+- [ ] Badge upload, cancellation, interrupted transfer and ordinary firmware update preserve the previous content.
+- [ ] Home Assistant actual-state confirmation and one Spotify action over direct Wi-Fi and the iPhone bridge, including locked iPhone.
+- [ ] USB Bridge US/Italian keyboard layouts, pointer, disconnect/suspend and Slide in a focused presentation application.
+- [ ] Normal build has no functioning FIDO authenticator; LAB is tested only with disposable credentials and a fresh physical confirmation.
+
+## Known limits
+
+Time zones are an explicit list, not the full IANA database; future DST rule changes require firmware updates. App, device, speech and keyboard languages/layouts are independent. iOS controls background scheduling. Device flash is not encrypted. The remote Home Assistant bridge requires administrator scope. Battery life, acoustic quality and radio reliability are not established by host tests.
