@@ -1,4 +1,4 @@
-# USB Bridge and Slide
+# USB Bridge
 
 [Italiano — protocol and controls](USB_CONTROL.it.md)
 
@@ -8,6 +8,6 @@ For phone control, pair Companion, open Bridge on StopWatch and USB Control on i
 
 Input is gated by the device screen and session. Disconnects, suspension and screen transitions invalidate remote input. The fast BLE mouse channel is best-effort; commands are bounded and stale sessions are rejected. Keep the intended target application focused on the computer.
 
-Slide works without the phone: A previous, B next, touch Blackout / resume sends B. Companion settings select left/right arrows or Page Up/Down. The presentation application must be in the foreground. Switching between Bridge and Slide invalidates the old input session.
+The standalone Slide remote is not in the launcher of the current build.
 
-See [development checks](DEVELOPMENT.md) for HID/session tests. Actual pointer latency, host layout behavior and presentation shortcuts require a physical USB test on each supported host.
+See [development checks](DEVELOPMENT.md) for HID/session tests. Actual pointer latency, and host layout behavior require a physical USB test on each supported host.

@@ -200,7 +200,6 @@ void VoiceNotes::update() {
         succeeded_ = !captureError_.load();
         message_ = succeeded_ ? i18n::text("Nota salvata sul dispositivo") : i18n::text("Nota parziale salvata: errore microfono");
         finishedEvent_ = true;
-        warmMicrophone();
     }
 }
 

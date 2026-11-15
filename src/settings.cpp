@@ -122,15 +122,16 @@ bool Settings::update(JsonObjectConst input, String& error) {
         next.presentationPageKeys=input["presentation_page_keys"].as<bool>();
     }
     if(!input["home_apps"].isUnbound()) {
-        if(!input["home_apps"].is<JsonArrayConst>() || input["home_apps"].size()<1 || input["home_apps"].size()>launcher::appCount) { error=i18n::text("Home non valida");return false; }
+        if(!input["home_apps"].is<JsonArrayConst>() || input["home_apps"].size()<1 || input["home_apps"].size()>launcher::appCount+2) { error=i18n::text("Home non valida");return false; }
         std::array<bool,launcher::appCount> seen{};next.homeAppCount=0;
         for(auto item:input["home_apps"].as<JsonArrayConst>()) {
             const bool valid=item.is<const char*>() && std::strlen(item.as<const char*>())==item.as<JsonString>().size();
+            if(valid && launcher::retired(item.as<const char*>())) continue;
             const int app=valid?launcher::index(item.as<const char*>()):-1;
             if(app<0 || seen[app]) { error=i18n::text("App Home non valida o duplicata");return false; }
             seen[app]=true;next.homeApps[next.homeAppCount++]=app;
         }
-        if(!seen[7]) { error=i18n::text("Sistema deve restare visibile");return false; }
+        if(!seen[launcher::system]) { error=i18n::text("Sistema deve restare visibile");return false; }
     }
     String ssidValue, password, token;
     if(!input["clock_face"].isUnbound()) {

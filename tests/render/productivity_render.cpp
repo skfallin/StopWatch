@@ -15,5 +15,4 @@ int main(int argc,char** argv) {
         if(state==1) focus.toggle(0);if(state==2) focus.toggle(10000);if(state==3) { focus.toggle(10000);focus.update(1500000); }
         std::ofstream out(root/("focus-"+std::to_string(state)+".jsonl"));M5Canvas c(out);productivity_ui::focus(c,focus);
     }
-    for(bool usb:{false,true}) { std::ofstream out(root/(usb?"slides-connected.jsonl":"slides-offline.jsonl"));M5Canvas c(out);productivity_ui::slides(c,184000,usb); }
 }

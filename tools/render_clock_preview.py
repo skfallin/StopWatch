@@ -23,8 +23,7 @@ if scene:
     constants = "\n".join(line for line in main.splitlines() if line.startswith("const char* setting"))
     views = "\n".join(function(name) for name in (
         "void header(const char* title)", "int settingValue()", "void drawStatus()",
-        "void drawSystem()", "String settingSummary(int item)", "void drawSettingsMenu()",
-        "void drawSettingsSection()", "void drawSettings()", "void drawLight()", "void arrows()", "void drawCasa()"))
+        "void drawHomeClock()", "String settingSummary(int item)", "void drawSystem()", "void drawSettings()", "void drawLight()", "void arrows()", "void drawCasa()"))
     (output / "scene_settings.inc").write_text(constants + "\n" + views.replace('entity.startsWith("light.")', 'entity.rfind("light.",0)==0'))
     font = ImageFont.truetype(str(root / "assets/fonts/InterVariable.ttf"), 18)
     font.set_variation_by_axes([400 if a["name"] == b"Weight" else min(32, a["maximum"]) for a in font.get_variation_axes()])
@@ -119,17 +118,17 @@ def sheet(name, frames):
     result.save(output/name)
 
 if scene:
-    sheet("scene.png", [("scene-0-0", "Casa"), ("scene-1-0", "Tasca"), ("scene-2-0", "Strumenti"),
-          ("system", "Sistema"), ("settings", "Impostazioni"), ("charging", "In carica")])
-    sheet("scene-settings.png", [("settings-section-0", "Display"), ("settings-section-1", "Audio"),
-          ("settings-audio-2", "Audio · pagina 2"), ("slider-0", "Slider invariato"),
+    sheet("scene.png", [("scene-0", "Home"), ("scene-4", "Orologio selezionato"), ("home-only-system", "Solo Sistema"),
+          ("system", "Sistema"), ("system-2", "Sistema · pagina 2"), ("charging", "In carica")])
+    sheet("scene-settings.png", [("system-4", "Sistema · pagina 3"), ("slider-0", "Luminosità"),
+          ("slider-1", "Volume"), ("slider-3", "Spegnimento schermo"),
           ("slider-5", "Colori"), ("notice", "Avvisi uniformi")])
 elif quick:
     sheet("quick-settings.png", [("quick-off", "Disattivato"), ("quick-on", "Silenzio completo"),
           ("quick-pending", "Salvataggio dopo la nota"), ("quick-failed", "Errore di salvataggio"),
           ("quick-buttons", "Palette dei pulsanti"), ("quick-violet", "Palette viola")])
 elif productivity:
-    sheet("productivity.png", [("focus-0", "Focus · pronto"), ("focus-1", "Concentrazione"), ("focus-2", "In pausa"), ("focus-3", "Sessione completata"), ("slides-connected", "Slide · USB"), ("slides-offline", "Slide · collega USB")])
+    sheet("productivity.png", [("focus-0", "Focus · pronto"), ("focus-1", "Concentrazione"), ("focus-2", "In pausa"), ("focus-3", "Sessione completata")])
 elif music:
     sheet("music.png", [("playing", "In ascolto"), ("paused", "In pausa"), ("devices", "Lettori Spotify Connect"),
           ("offline", "Connessione interrotta"), ("waiting", "Invio comando"), ("empty", "Nessun brano")])

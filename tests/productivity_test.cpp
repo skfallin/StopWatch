@@ -20,14 +20,15 @@ int main() {
     focus.toggle(++now);focus.toggle(++now);assert(focus.timer().state()==clockwork::Timer::State::Paused);
     assert(focus.reset() && focus.sessions()==0 && focus.timer().remainingSeconds()==1500);
     ui::HomeMenu home;
-    std::array<int,launcher::appCount> order{7,4,0,8,1,2,3,5,6,9};
-    home.configure(order,1);assert(home.space==2 && home.app()==7 && home.visibleCount()==1);
-    home.nextSpace(1);assert(home.space==2);home.nextApp(1);assert(home.app()==7);
-    home.configure(order,order.size());home.space=0;home.selected=0;assert(home.app()==4);
-    home.nextApp(1);assert(home.app()==0);
-    home.space=1;home.selected=0;assert(home.app()==8 && home.count()==4 && home.visibleCount()==3);
+    std::array<int,launcher::appCount> order{launcher::system,4,0,7,1,2,3,5};
+    home.configure(order,1);assert(home.app()==launcher::system && home.count()==1);
+    home.nextApp(1);assert(home.app()==launcher::system);
+    home.configure(order,order.size());assert(home.app()==launcher::system);
+    home.nextApp(1);assert(home.app()==4);
+    // Reordering keeps the highlighted app.
+    home.configure(launcher::defaultOrder,launcher::appCount);assert(home.app()==4 && home.count()==8);
     bool seen[launcher::appCount]={};for(int i=0;i<home.count();++i) { seen[home.app()]=true;home.nextApp(1); }
-    assert(seen[1] && seen[2] && seen[3] && seen[8]);
+    for(bool app:seen) assert(app);
     ui::TouchInput touch;
     touch.update(0,true,233,200,false);touch.update(100,true,233,300,false);
     assert(touch.update(120,false,233,300,false).kind==ui::GestureKind::Down);

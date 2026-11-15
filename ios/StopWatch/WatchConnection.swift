@@ -29,7 +29,8 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var devices: [DiscoveredWatch] = []
-    @Published private(set) var status: DeviceStatus?
+    // The watch drops Bluetooth while it rests on battery; keep the last level for the dashboard.
+    @Published private(set) var status: DeviceStatus? { didSet { if let status { UserDefaults.standard.set(status.battery, forKey: "lastBattery") } } }
     @Published private(set) var configuration: DeviceConfiguration?
     @Published private(set) var usbState: USBControlStatus?
     @Published private(set) var usbIssue: String?
@@ -165,6 +166,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         shouldReconnect = false
         rememberedID = nil
         UserDefaults.standard.removeObject(forKey: Self.rememberedKey)
+        UserDefaults.standard.removeObject(forKey: "lastBattery")
         if !preview {
             central.stopScan()
             if let peripheral { central.cancelPeripheralConnection(peripheral) }
@@ -177,17 +179,24 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
     }
 
     private func beginConnection(_ device: CBPeripheral) {
-        guard phase != .connecting || peripheral?.identifier != device.identifier else { return }
+        guard (phase != .connecting && phase != .reconnecting) || peripheral?.identifier != device.identifier else { return }
         error = nil
         peripheral = device
         device.delegate = self
-        phase = .connecting
+        // A paired watch stops advertising while it rests on battery: wait for it without a deadline.
+        let known = device.identifier == rememberedID
+        phase = known ? .reconnecting : .connecting
         central.connect(device)
+        connectionTimeout?.cancel()
+        if !known { armConnectionTimeout(device) }
+    }
+
+    private func armConnectionTimeout(_ device: CBPeripheral) {
         connectionTimeout?.cancel()
         connectionTimeout = Task { [weak self] in
             try? await Task.sleep(for: .seconds(60))
             guard !Task.isCancelled, let self, !self.ready else { return }
-            self.error = String(localized: "Connessione non completata. Sullo StopWatch apri iPhone Bluetooth e premi B per abbinare.", bundle: AppLocalization.bundle)
+            self.error = String(localized: "Connessione non completata. Sullo StopWatch apri Sistema → iPhone e premi B per abbinare.", bundle: AppLocalization.bundle)
             self.central.cancelPeripheralConnection(device)
         }
     }
@@ -224,6 +233,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         self.peripheral = peripheral
         peripheral.delegate = self
         phase = .authorizing
+        armConnectionTimeout(peripheral)
         rx = nil; tx = nil; frames = FrameBuffer()
         peripheral.discoverServices([Self.service])
     }
@@ -421,7 +431,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
             badgeState=status?.badge
             if let status, !status.recording, status.notes != remoteNotes.count { try await loadNotes() }
         }
-        catch { self.error = error.localizedDescription }
+        catch { if ready { self.error = error.localizedDescription } } // A resting watch is not an error.
     }
 
     func enqueueUSB(_ input: USBInput) {
@@ -605,7 +615,7 @@ final class WatchConnection: NSObject, ObservableObject, @preconcurrency CBCentr
         guard ready, !working, pending == nil, status?.recording != true else { return }
         working = true
         defer { working = false }
-        do { try await loadNotes() } catch { self.error = error.localizedDescription }
+        do { try await loadNotes() } catch { if ready { self.error = error.localizedDescription } }
     }
 
     func save(_ value: DeviceConfiguration, part: SettingsPart) async throws {

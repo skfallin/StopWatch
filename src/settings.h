@@ -19,7 +19,7 @@ struct Settings {
     String language="en", timeZone="UTC";
     std::array<int,launcher::appCount> homeApps=launcher::defaultOrder;
     size_t homeAppCount=launcher::appCount;
-    uint8_t brightness = 160;
+    uint8_t brightness = 120;
     uint8_t volume = 80;
     uint8_t noteVolume = 80;
     bool doNotDisturb = false;
@@ -31,7 +31,7 @@ struct Settings {
     bool clockKeepAwake=false;
     uint32_t timerSeconds=300;
     uint8_t vibration = 120;
-    uint16_t screenTimeout = 45;
+    uint16_t screenTimeout = 20;
     String ssid, wifiPassword;
     String haUrl, haToken, haCa;
     String mqttHost, mqttUser, mqttPassword, mqttCa;

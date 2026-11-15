@@ -5,7 +5,9 @@
 #include <utility/M5IOE1_Class.hpp>
 #include <WiFi.h>
 #include <atomic>
+#include <driver/gpio.h>
 #include <esp_heap_caps.h>
+#include <esp_sleep.h>
 #include <time.h>
 #include "controls.h"
 #include "companion.h"
@@ -25,7 +27,6 @@
 #include "music_artwork.h"
 #include "quick_settings_view.h"
 #include "scene_view.h"
-#include "security_key.h"
 
 namespace {
 constexpr uint32_t muted = 0x9aaebd;
@@ -39,14 +40,12 @@ using Screen = ui::Screen;
 const char* diagnostics[] = {"Pulsanti A e B", "Touch", "Display AMOLED", "Vibrazione", "Altoparlante",
     "Microfono", "Movimento / IMU", "Orologio RTC", "Batteria / USB", "Wi-Fi", "Bluetooth LE", "Archivio / RAM", "Porta Grove / GPIO", "LED verde"};
 const char* settingNames[] = {"Luminosità", "Interazioni", "Vibrazione", "Spegni display", "Pacchetto suoni", "Colori", "Volume note"};
-const char* settingsSections[]={"Display","Audio","Standby"};
 Settings settings;
 VoiceNotes notes;
 Badge badgeApp;
 clockwork::Timer clockTimer;
 clockwork::Stopwatch chronometer;
 clockwork::Focus focusSession;
-clockwork::Stopwatch presentationTime;
 size_t clockItem=0;
 size_t musicSource=0;
 size_t musicMenu=0,playlistItem=0;
@@ -79,6 +78,10 @@ bool ledOn = false, showPageQr = false, forgetOption = false;
 bool homeAfterNote = false;
 uint32_t lastInteraction = 0, lastDraw = 0, lastTick = 0, vibrationUntil = 0;
 uint32_t lastBatteryRead=0,lastCpuWork=0;
+// Standby is battery only: USB keeps the radios and the serial port awake.
+bool usbPower=true,standby=false;
+uint32_t standbyAt=0;
+constexpr uint32_t powerOffAfterMs=2*60*60*1000;
 bool cpuScaling=true;
 uint32_t noticeAt = 0, reconnectAt = 0, lastHaRead = 0, lastRtcSync = 0;
 uint32_t noticeDuration=4500,lastChargeRead=0;
@@ -131,11 +134,22 @@ bool cpuWorkPending() {
     const bool idleBadge=screen==Screen::Badge && badgeApp.available() &&
         (!badgeApp.animated() || !settings.badgeAnimate) &&
         (!settings.badgeAutoRotate || uint32_t(millis()-badgeApp.lastMotion())>=2000);
-    const bool passiveDisplay=!quickPanelOpen && (screen==Screen::Clock || screen==Screen::Focus || screen==Screen::Slides || idleBadge);
-    return (!screenOff && !passiveDisplay) || M5.BtnA.isPressed() || M5.BtnB.isPressed() || M5.Touch.getCount()>0 ||
+    // Only screens that repaint continuously hold the fast clock; any other frame borrows it while drawing.
+    const bool animated=!screenOff && !quickPanelOpen && ((screen==Screen::Badge && !idleBadge) ||
+        (screen==Screen::Stopwatch && chronometer.running()) || (screen==Screen::Timer && clockTimer.state()==clockwork::Timer::State::Running));
+    return animated || M5.BtnA.isPressed() || M5.BtnB.isPressed() || M5.Touch.getCount()>0 ||
         notes.busy() || notes.playing() || M5.Speaker.isPlaying() ||
         home.busy() || homeCommand.pending() || portal.active() || badgeApp.uploading() ||
-        companion.hasWork() || mqtt.hasWork() || musicArtwork.busy() || usbControl.busy() || security_key::busy();
+        companion.hasWork() || mqtt.hasWork() || musicArtwork.busy() || usbControl.busy();
+}
+
+void lightSleep() {
+    // shortcut: this SDK build has no automatic light sleep, so the loop naps between polls; rebuild with CONFIG_PM_ENABLE to keep radios linked.
+    // Buttons and the touch interrupt are active low; the timer keeps battery, USB and power-off checks alive.
+    for(auto pin:{GPIO_NUM_1,GPIO_NUM_2,GPIO_NUM_13}) gpio_wakeup_enable(pin,GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+    esp_sleep_enable_timer_wakeup(1000000);
+    esp_light_sleep_start();
 }
 
 void sound(sfx::Cue cue, bool preview=false) {
@@ -158,6 +172,7 @@ void updateCharging(uint32_t now) {
     const bool usb=vbus>=4000;
     const int candidate=(usb?1:0)+(usb && state==m5::Power_Class::is_charging?2:0);
     if(candidate!=chargeCandidate) { chargeCandidate=candidate;return; }
+    usbPower=usb;
     const bool next=(candidate&2)!=0;
     if(charging!=next) { charging=next;dirty=true; }
     if(!usb) {
@@ -166,7 +181,7 @@ void updateCharging(uint32_t now) {
     }
     if(charging && !chargeNotified) { chargeNotified=true;chargeNoticePending=true; }
     if(!charging) chargeNoticePending=false;
-    if(!chargeNoticePending || notes.busy() || quickPanelOpen || security_key::awaiting() ||
+    if(!chargeNoticePending || notes.busy() || quickPanelOpen ||
         screen==Screen::Companion || screen==Screen::NoteSaved ||
         (!notice.isEmpty() && uint32_t(now-noticeAt)<noticeDuration)) return;
     chargeNoticePending=false;
@@ -174,6 +189,7 @@ void updateCharging(uint32_t now) {
     noticeIcon=ui::Icon::Charging;
     noticeDetail=(batteryLevel<0?String(i18n::text("USB collegata")):String(batteryLevel)+i18n::text("% · USB collegata"));
     noticeDuration=3200;
+    if(screenOff) M5.Display.wakeup();
     screenOff=false;displayDimmed=false;lastInteraction=now;
     M5.Display.setBrightness(settings.brightness);
 }
@@ -279,8 +295,6 @@ void extraStatus(JsonObject out) {
 void deviceStatus(JsonObject out) { companion.status(out); }
 
 void changeScreen(Screen next) {
-    if(screen==Screen::Slides && next!=Screen::Slides && presentationTime.running()) presentationTime.toggle(millis());
-    if(next==Screen::Slides && screen!=next) { presentationTime.reset();presentationTime.toggle(millis()); }
     if(screen==Screen::Badge && next!=Screen::Badge) badgeApp.suspend();
     if(next==Screen::UsbControl && screen!=next) usbPaused=false;
     if(displayDimmed && screen!=next) { displayDimmed=false; if(!screenOff) M5.Display.setBrightness(settings.brightness); }
@@ -299,8 +313,7 @@ void changeScreen(Screen next) {
         M5.Power.setLed(0); ledOn = false;
     }
     screen = next;
-    security_key::update(screen==Screen::SecurityKey && !quickPanelOpen && !notes.busy(),M5.BtnA.isPressed(),M5.BtnB.isPressed());
-    usbControl.update(((screen==Screen::UsbControl && !usbPaused) || screen==Screen::Slides) && !quickPanelOpen && !notes.busy(),companion.connected(),millis(),screen==Screen::Slides);
+    usbControl.update(screen==Screen::UsbControl && !usbPaused && !quickPanelOpen && !notes.busy(),companion.connected(),millis());
     if (next == Screen::Companion && !portal.start()) toast(i18n::text("Avvio Wi-Fi companion fallito"));
     dirty = true;
 }
@@ -361,12 +374,24 @@ void drawStatus() {
     }
 }
 
+void drawHomeClock() {
+    tm local{};
+    const time_t now=time(nullptr);
+    localtime_r(&now,&local);
+    char clock[8]="--:--";
+    if(now>=1704067200) strftime(clock,sizeof(clock),"%H:%M",&local);
+    ui::label(canvas,clock,233,222,ui::Font::Clock,ui::white,ui::black,220);
+    const String battery=batteryLevel<0?"--":String(batteryLevel)+"%";
+    ui::label(canvas,battery,233,166,ui::Font::Small,charging?ui::accent:ui::muted,ui::black,90);
+    if(settings.doNotDisturb) ui::icon(canvas,ui::Icon::Moon,233,138,14,ui::accent);
+}
+
 void drawHome() {
     const uint32_t age=uint32_t(millis()-transitionAt);
     scene_ui::home(canvas,homeMenu,age);
     // Rendering itself can cross the deadline; present one frame at the final geometry.
     homeFramePending=age<180;
-    drawStatus();
+    drawHomeClock();
 }
 
 bool badgeControls() { return !badgeApp.available() || !badgeApp.error().isEmpty() || (badgeControlsUntil && int32_t(badgeControlsUntil-millis())>0); }
@@ -375,7 +400,6 @@ int touchSelection() {
     if(screen==Screen::MusicSources) return int(musicSource);
     if(screen==Screen::MusicPlaylists) return mqtt.playlists().items.empty()?-1:int(playlistItem);
     if(screen==Screen::System) return int(systemItem);
-    if(screen==Screen::SettingsMenu || screen==Screen::SettingsSection) return int(setting);
     return screen==Screen::Timer?int(clockTimer.state()!=clockwork::Timer::State::Idle):0;
 }
 void clockPage(int index) {
@@ -422,20 +446,6 @@ void drawBadge() {
     }
 }
 
-void drawSystem() {
-    drawStatus();
-    header(i18n::text("Sistema"));
-    const char* titles[]={"Impostazioni","Diagnostica","iPhone","Browser Wi-Fi"};
-    const char* details[]={"Display, audio, standby","Verifica hardware","Abbinamento e ponte","Configurazione web"};
-    const ui::Icon icons[]={ui::Icon::Sliders,ui::Icon::Activity,ui::Icon::Bluetooth,ui::Icon::Link};
-    const int page=systemItem/2;
-    for(int slot=0;slot<2;++slot) {
-        const int item=page*2+slot;
-        scene_ui::row(canvas,ui::menuRow(slot),i18n::text(titles[item]),icons[item],i18n::text(details[item]),item==int(systemItem));
-    }
-    scene_ui::pages(canvas,page);
-}
-
 String settingSummary(int item) {
     const int values[]={settings.brightness,settings.volume,settings.vibration,settings.screenTimeout,settings.soundPack,settings.colorTheme,settings.noteVolume};
     if(item==4) return i18n::text(sfx::packNames[values[item]]);
@@ -444,26 +454,22 @@ String settingSummary(int item) {
     return String(values[item]*100/((item==1 || item==6)?200:255))+"%";
 }
 
-void drawSettingsMenu() {
-    drawStatus();header(i18n::text("Impostazioni"));
-    const ui::Icon icons[]={ui::Icon::Sun,ui::Icon::Speaker,ui::Icon::Timer};
-    for(int section=0;section<3;++section)
-        scene_ui::row(canvas,ui::settingsRow(section),i18n::text(settingsSections[section]),icons[section],"",section==ui::settingsSection(setting));
-}
-
-void drawSettingsSection() {
-    const int section=ui::settingsSection(setting),page=ui::settingsPosition(setting)/2;
-    drawStatus();header(i18n::text(settingsSections[section]));
-    const ui::Icon icons[]={ui::Icon::Sun,ui::Icon::Speaker,ui::Icon::Activity,ui::Icon::Clock,ui::Icon::Speaker,ui::Icon::Sliders,ui::Icon::Mic};
-    for(int slot=0;slot<2 && page*2+slot<ui::settingsCount(section);++slot) {
-        const int item=ui::settingsItems[section][page*2+slot];
-        scene_ui::row(canvas,ui::menuRow(slot),i18n::text(settingNames[item]),icons[item],settingSummary(item),item==int(setting));
+void drawSystem() {
+    drawStatus();
+    header(i18n::text("Sistema"));
+    const char* titles[]={settingNames[0],settingNames[1],settingNames[3],"iPhone","Browser Wi-Fi","Diagnostica"};
+    const char* details[]={"","","","Abbinamento e ponte","Configurazione web","Verifica hardware"};
+    const ui::Icon icons[]={ui::Icon::Sun,ui::Icon::Speaker,ui::Icon::Clock,ui::Icon::Bluetooth,ui::Icon::Link,ui::Icon::Activity};
+    const int page=systemItem/2;
+    for(int slot=0;slot<2;++slot) {
+        const int item=page*2+slot;
+        scene_ui::row(canvas,ui::menuRow(slot),i18n::text(titles[item]),icons[item],item<3?settingSummary(ui::systemSettings[item]):i18n::text(details[item]),item==int(systemItem));
     }
-    if(ui::settingsCount(section)>2) scene_ui::pages(canvas,page);
+    scene_ui::pages(canvas,page,ui::systemCount/2);
 }
 
 void drawSettings() {
-    drawStatus();header(i18n::text(settingsSections[ui::settingsSection(setting)]));
+    drawStatus();header(i18n::text("Sistema"));
     const ui::Icon icons[]={ui::Icon::Sun,ui::Icon::Speaker,ui::Icon::Activity,ui::Icon::Clock,ui::Icon::Speaker,ui::Icon::Sliders,ui::Icon::Mic};
     const int value=settingValue();
     ui::label(canvas,i18n::text(settingNames[setting]),233,140,ui::Font::Label,ui::white);
@@ -750,7 +756,6 @@ void drawDiagnostics() {
 }
 
 void draw() {
-    const uint32_t keyPrompt=security_key::promptId();
     const bool lit=screen==Screen::HomeAssistant && favorite<settings.favoriteCount && states[favorite]=="on";
     const bool recording=notes.state()==VoiceNotes::State::Recording;
     surfaceColor=!quickPanelOpen && (recording || (!notes.busy() && (lit || screen==Screen::NoteSaved)))?ui::focus:ui::black;
@@ -760,24 +765,6 @@ void draw() {
     else if(notes.busy()) drawRecording();
     else switch(screen) {
     case Screen::Home: drawHome(); break;
-    case Screen::SecurityKey: {
-        header(i18n::text("Chiave · LAB"));
-        ui::icon(canvas,ui::Icon::Key,233,145,58,security_key::awaiting()?ui::focus:ui::accent);
-        const String rp=security_key::awaiting()?security_key::relyingParty():String();
-        const int lines=(rp.length()+19)/20;
-        if(!rp.length()) ui::label(canvas,i18n::text("Prototipo reversibile"),233,230,ui::Font::Label,ui::white,ui::black,320);
-        else for(int i=0;i<lines;++i)
-            ui::label(canvas,rp.substring(i*20,std::min(int(rp.length()),(i+1)*20)),233,230-(lines-1)*12+i*24,ui::Font::Small,ui::white,ui::black,340);
-        ui::label(canvas,security_key::message(),233,lines>2?302:279,ui::Font::Small,ui::muted,ui::black,330);
-        if(security_key::awaiting()) {
-            ui::pill(canvas,233,342,272,i18n::text("B blu · Conferma"),ui::focusPanel,ui::focus);
-            ui::label(canvas,i18n::text("A · Annulla"),233,396,ui::Font::Small,ui::muted);
-        } else {
-            ui::label(canvas,i18n::text("Solo account di prova"),233,352,ui::Font::Body,ui::muted);
-            ui::label(canvas,i18n::text("A lungo · Esci"),233,398,ui::Font::Small,ui::muted);
-        }
-        break;
-    }
     case Screen::UsbControl:
         header(i18n::text("Ponte"));
         ui::icon(canvas,ui::Icon::Usb,233,183,85,usbControl.connected()?ui::accent:ui::muted);
@@ -786,8 +773,6 @@ void draw() {
         ui::pill(canvas,233,372,240,usbPaused || usbControl.fault()?i18n::text("Riprendi"):i18n::text("Sospendi"));
         break;
     case Screen::System: drawSystem(); break;
-    case Screen::SettingsMenu: drawSettingsMenu(); break;
-    case Screen::SettingsSection: drawSettingsSection(); break;
     case Screen::Settings: drawSettings(); break;
     case Screen::HomeAssistant: drawCasa(); break;
     case Screen::Light: drawLight();break;
@@ -810,7 +795,6 @@ void draw() {
         clockDrawnSecond=epoch;break;
     }
     case Screen::Focus: productivity_ui::focus(canvas,focusSession);break;
-    case Screen::Slides: productivity_ui::slides(canvas,presentationTime.elapsed(),usbControl.connected());break;
     case Screen::Timer: clock_ui::timer(canvas,clockTimer);break;
     case Screen::Stopwatch: clock_ui::stopwatch(canvas,chronometer);break;
     case Screen::NoteSaved: drawSaved(); break;
@@ -825,7 +809,6 @@ void draw() {
     if(quickPanelOpen) noticeDisplayed=false;
     else drawNotice();
     canvas.pushSprite(0,0);
-    if(screen==Screen::SecurityKey && !quickPanelOpen && !screenOff) security_key::presented(keyPrompt);
     dirty=false;
     lastDraw=millis();
 }
@@ -937,34 +920,21 @@ void playlistPage(uint32_t offset) {
     } else toast(mqtt.available()?i18n::text("Attendi Spotify"):i18n::text("Collega Wi-Fi o iPhone"));
 }
 
-void slideKey(bool next,bool blackout=false) {
-    if(!usbControl.connected()) { toast(i18n::text("Collega il cavo USB dati"));return; }
-    const uint8_t key=blackout?0x05:settings.presentationPageKeys?(next?0x4e:0x4b):(next?0x4f:0x50);
-    if(!usbControl.presentationKey({key,0})) { toast(i18n::text("USB occupata: riprova"));return; }
-    sound(sfx::Cue::Select);dirty=true;
-}
-
 void selectAction(bool fromButton=false) {
-    if(screen==Screen::Slides) { slideKey(true,!fromButton);return; }
     if(screen==Screen::Focus) { focusSession.toggle(millis());dirty=true;sound(sfx::Cue::Select);return; }
     switch(screen) {
     case Screen::UsbControl:
         if(usbControl.fault()) { usbPaused=true;usbControl.update(false,companion.connected(),millis()); }
         usbPaused=!usbPaused;dirty=true;break;
     case Screen::Home: {
-        if(fromButton && !homeMenu.apps) { homeMenu.apps=true;homeMenu.selected=0;sound(sfx::Cue::Select);break; }
-        const Screen pages[]={Screen::HomeAssistant,Screen::Notes,Screen::Badge,Screen::ClockMenu,Screen::Spotify,Screen::UsbControl,Screen::SecurityKey,Screen::System,Screen::Focus,Screen::Slides};
-        homeMenu.apps=true;changeScreen(pages[homeMenu.app()]); sound(sfx::Cue::Open); break;
+        const Screen pages[]={Screen::HomeAssistant,Screen::Notes,Screen::Badge,Screen::ClockMenu,Screen::Spotify,Screen::UsbControl,Screen::System,Screen::Focus};
+        changeScreen(pages[homeMenu.app()]); sound(sfx::Cue::Open); break;
     }
     case Screen::System: {
-        const Screen pages[]={Screen::SettingsMenu,Screen::Diagnostics,Screen::Pairing,Screen::Companion};
-        changeScreen(pages[systemItem]); sound(sfx::Cue::Open); break;
+        const Screen pages[]={Screen::Pairing,Screen::Companion,Screen::Diagnostics};
+        if(systemItem<3) setting=ui::systemSettings[systemItem];
+        changeScreen(systemItem<3?Screen::Settings:pages[systemItem-3]); sound(sfx::Cue::Open); break;
     }
-    case Screen::SettingsMenu:
-        changeScreen(ui::settingsSection(setting)==2?Screen::Settings:Screen::SettingsSection);
-        sound(sfx::Cue::Open);break;
-    case Screen::SettingsSection:
-        changeScreen(Screen::Settings);sound(sfx::Cue::Open);break;
     case Screen::Settings:
         switch(setting) {
         case 0: commitSetting(settings.brightness>=240?32:std::min(255,int(settings.brightness)+32)); break;
@@ -1066,10 +1036,8 @@ void selectAction(bool fromButton=false) {
 
 void backAction() {
     switch(screen) {
-    case Screen::Home: homeMenu.apps=false;dirty=true;break;
-    case Screen::Settings: changeScreen(ui::settingsSection(setting)==2?Screen::SettingsMenu:Screen::SettingsSection);break;
-    case Screen::SettingsSection: changeScreen(Screen::SettingsMenu);break;
-    case Screen::SettingsMenu:
+    case Screen::Home: dirty=true;break;
+    case Screen::Settings:
     case Screen::Diagnostics:
     case Screen::Pairing:
     case Screen::Companion: changeScreen(Screen::System); break;
@@ -1091,12 +1059,10 @@ void backAction() {
 
 void nextAction(int direction=1,bool page=false) {
     if(settingPreview>=0) { settingPreview=-1; applySettings(); }
-    if(screen==Screen::Slides) { slideKey(page?direction>0:false);return; }
     if(screen==Screen::Focus) { if(focusSession.reset()) { dirty=true;sound(sfx::Cue::Select); }return; }
     switch(screen) {
     case Screen::Home:
-        if(page || !homeMenu.apps) homeMenu.nextSpace(direction);else homeMenu.nextApp(direction);
-        transitionAt=millis();break;
+        homeMenu.nextApp(direction);transitionAt=millis();break;
     case Screen::ClockMenu: clockItem=(clockItem+3+direction)%3;break;
     case Screen::Spotify: musicCommand(direction>0?music::Command::Next:music::Command::Previous);return;
     case Screen::MusicMenu: musicMenu=(musicMenu+1)%2;break;
@@ -1114,15 +1080,7 @@ void nextAction(int direction=1,bool page=false) {
     case Screen::Clock: nextClockFace();return;
     case Screen::Timer: timerSecondaryAction();return;
     case Screen::Stopwatch: stopwatchSecondaryAction();return;
-    case Screen::System: systemItem=page?((systemItem/2+2+direction)%2)*2:(systemItem+4+direction)%4; break;
-    case Screen::SettingsMenu: setting=ui::settingsItems[(ui::settingsSection(setting)+3+direction)%3][0];break;
-    case Screen::SettingsSection: {
-        const int section=ui::settingsSection(setting),count=ui::settingsCount(section),position=ui::settingsPosition(setting);
-        const int pages=(count+1)/2;
-        const int next=page?((position/2+pages+direction)%pages)*2:(position+count+direction)%count;
-        setting=ui::settingsItems[section][next];
-        break;
-    }
+    case Screen::System: systemItem=page?((systemItem/2+3+direction)%3)*2:(systemItem+ui::systemCount+direction)%ui::systemCount; break;
     case Screen::Settings: setting=(setting+7+direction)%7; break;
     case Screen::Diagnostics:
         M5.Power.setLed(0); ledOn=false; diagnostic=(diagnostic+14+direction)%14; break;
@@ -1213,7 +1171,7 @@ void handleTouch(const ui::Gesture& gesture) {
         return;
     }
     if(screen==Screen::Home && (gesture.kind==GestureKind::Up || gesture.kind==GestureKind::Down)) {
-        homeMenu.apps=true;homeMenu.nextApp(gesture.kind==GestureKind::Up?1:-1);
+        homeMenu.nextApp(gesture.kind==GestureKind::Up?1:-1);
         transitionAt=millis();dirty=true;vibrate();sound(sfx::Cue::Select);return;
     }
     if(gesture.kind==GestureKind::Up || gesture.kind==GestureKind::Down) {
@@ -1305,8 +1263,7 @@ void handleTouch(const ui::Gesture& gesture) {
             }
             badgeControlsUntil=millis()+4000; dirty=true; break;
         }
-        if(screen==Screen::Home) homeMenu.nextApp(target.index);
-        else if(screen==Screen::SettingsMenu || screen==Screen::SettingsSection) setting=target.index;
+        if(screen==Screen::Home) homeMenu.selected=target.index;
         else if(screen==Screen::System) systemItem=target.index;
         else if(screen==Screen::Pairing) forgetOption=!companion.pairing() && target.index==1;
         selectAction(); break;
@@ -1382,7 +1339,6 @@ void setup() {
     // Setup leaves the canvas to this task until it has acknowledged completion.
     const bool bootIndicatorStarted=xTaskCreate(showBootLoading,"boot-display",4096,&boot,1,nullptr)==pdPASS;
     notes.begin();
-    security_key::begin();
     if(notes.ready()) badgeApp.begin();
     if(notes.ready()) sfx::begin(settings.soundPack);
     Serial.printf("[boot] display pronto, archivio=%d heap_ok=%d\n", notes.ready(), heap_caps_check_integrity_all(true));
@@ -1392,6 +1348,7 @@ void setup() {
     Serial.printf("[boot] RTC pronto, heap_ok=%d\n", heap_caps_check_integrity_all(true));
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
+    WiFi.setSleep(WIFI_PS_MAX_MODEM);
     Serial.println("[boot] Wi-Fi STA pronto");
     WiFi.setHostname("stopwatch");
     WiFi.setAutoReconnect(true);
@@ -1406,7 +1363,6 @@ void setup() {
     if (!settingsOk) toast(i18n::text("Configurazione illeggibile: valori predefiniti"));
     else if (!notes.ready()) toast(i18n::text("Archivio da inizializzare in Diagnostica"));
     else if(!sfx::ready() && settings.soundPack) toast(i18n::text("Pacchetti audio da installare via USB"));
-    notes.warmMicrophone();
     boot.ready.store(true,std::memory_order_release);
     if(bootIndicatorStarted) while(!boot.stopped.load(std::memory_order_acquire)) delay(1);
     lastInteraction = millis();
@@ -1422,18 +1378,17 @@ void loop() {
         // A press begun before expiry must not restart or dismiss the new alert.
         controls.suppressTapUntilReleased();touchInput.suppressUntilReleased();
     }
-    presentationTime.update(now);
     focusSession.update(now);
-    const unsigned focusAlert=focusSession.alert(now,notes.busy() || notes.playing() || security_key::awaiting());
+    const unsigned focusAlert=focusSession.alert(now,notes.busy() || notes.playing());
     if(focusAlert==1) {
-        if(screenOff) { screenOff=false;displayDimmed=false;M5.Display.setBrightness(settings.brightness);lastInteraction=now; }
+        if(screenOff) { M5.Display.wakeup();screenOff=false;displayDimmed=false;M5.Display.setBrightness(settings.brightness);lastInteraction=now; }
         toast(focusSession.phase()==clockwork::Focus::Phase::Work?i18n::text("Focus completato"):i18n::text("Pausa terminata"));
         vibrate(180);sound(sfx::Cue::Complete,true);
     }
     const bool stopwatchWasRunning=chronometer.running();chronometer.update(now);
     if(stopwatchWasRunning && !chronometer.running() && screen==Screen::Stopwatch) dirty=true;
     sfx::update();
-    if(usbControl.update(((screen==Screen::UsbControl && !usbPaused) || screen==Screen::Slides) && !quickPanelOpen && !notes.busy(),companion.connected(),now,screen==Screen::Slides)) dirty=true;
+    if(usbControl.update(screen==Screen::UsbControl && !usbPaused && !quickPanelOpen && !notes.busy(),companion.connected(),now)) dirty=true;
     if (M5.BtnA.wasPressed()) ++pressesA;
     if (M5.BtnB.wasPressed()) ++pressesB;
     const auto touch=M5.Touch.getDetail();
@@ -1446,21 +1401,15 @@ void loop() {
         lastInteraction=now;
         if(screenOff) {
             screenOff=false;
+            M5.Display.wakeup();
             M5.Display.setBrightness(settings.brightness);
             controls.suppressTapUntilReleased();
             if(touch.wasPressed()) touchInput.suppressUntilReleased();
             lastBatteryRead=now-30000;
-            if(screen!=Screen::Badge && screen!=Screen::Clock && screen!=Screen::Spotify && screen!=Screen::MusicSources && screen!=Screen::MusicMenu && screen!=Screen::MusicPlaylists)
-                notes.warmMicrophone();
             dirty=true;
         }
     }
-    if(security_key::update(screen==Screen::SecurityKey && !quickPanelOpen && !notes.busy() && !screenOff,M5.BtnA.isPressed(),M5.BtnB.isPressed())) dirty=true;
     auto events=controls.update(now,M5.BtnA.isPressed(),M5.BtnB.isPressed());
-    if(screen==Screen::SecurityKey && !quickPanelOpen) {
-        // Only the physical presence gate consumes B; never start recording or confirm through touch/BLE.
-        events.next=events.select=events.recordStart=events.recordStop=false;
-    }
     if(notes.busy() || events.recordStop || events.next || events.select || events.home || events.back) lastInteraction=now;
     if(events.next || events.select || events.back || events.home || events.recordStart) {
         touchInput.suppressUntilReleased();
@@ -1488,7 +1437,6 @@ void loop() {
     if(events.recordStop) mqtt.button("b","release");
     if(events.home || events.recordStart) { if(quickPanelOpen) showQuickPanel(false); }
     if(events.home || (!panelButtons && events.back)) {
-        if(events.home) homeMenu.apps=false;
         stopRecording();
         if(!notes.busy()) {
             if(events.home) changeScreen(Screen::Home);
@@ -1544,6 +1492,7 @@ void loop() {
         updateCpu(now,true);
         if(timerAlert==1) {
             controls.suppressTapUntilReleased();
+            if(screenOff) M5.Display.wakeup();
             screenOff=false;M5.Display.setBrightness(settings.brightness);lastInteraction=now;
             changeScreen(Screen::Timer);
         }
@@ -1637,7 +1586,7 @@ void loop() {
         static bool relayReady=false;
         static size_t noteCount=0;
         const time_t minute=time(nullptr)/60;
-        if((screen==Screen::Home || screen==Screen::System || screen==Screen::SettingsMenu || screen==Screen::SettingsSection || screen==Screen::Settings) &&
+        if((screen==Screen::Home || screen==Screen::System || screen==Screen::Settings) &&
             (homeMinute!=minute || relayReady!=companion.relayReady())) dirty=true;
         homeMinute=minute;relayReady=companion.relayReady();
         if(!quickPanelOpen && screen==Screen::Notes) {
@@ -1645,7 +1594,8 @@ void loop() {
             if(count!=noteCount) dirty=true;
             noteCount=count;
         }
-        if(!quickPanelOpen && (screen==Screen::HomeAssistant || screen==Screen::Diagnostics || screen==Screen::Pairing || screen==Screen::Companion)) dirty=true;
+        // Casa repaints on every result; the slow tick only ages a stale state.
+        if(!quickPanelOpen && ((screen==Screen::HomeAssistant && uint32_t(now-lastDraw)>=2000) || screen==Screen::Diagnostics || screen==Screen::Pairing || screen==Screen::Companion)) dirty=true;
     }
     if(noticeDisplayed && uint32_t(now-noticeAt)>=noticeDuration) dirty=true;
     if(badgeApp.update(now,settings.badgeAutoRotate,settings.badgeAnimate,!quickPanelOpen && screen==Screen::Badge && !screenOff && !notes.busy())) dirty=true;
@@ -1653,13 +1603,13 @@ void loop() {
         if(time(nullptr)!=clockDrawnSecond) dirty=true;
         if(clockControlsUntil && int32_t(now-clockControlsUntil)>=0) { clockControlsUntil=0;dirty=true; }
     }
-    if(!quickPanelOpen && (screen==Screen::Focus || screen==Screen::Slides) && uint32_t(now-lastDraw)>=1000) dirty=true;
+    if(!quickPanelOpen && screen==Screen::Focus && uint32_t(now-lastDraw)>=1000) dirty=true;
     if(!quickPanelOpen && ((screen==Screen::Timer && clockTimer.state()==clockwork::Timer::State::Running && uint32_t(now-lastDraw)>=100) ||
        (screen==Screen::Stopwatch && chronometer.running() && uint32_t(now-lastDraw)>=50))) dirty=true;
     if(screen==Screen::Badge) {
         if(badgeControlsUntil && int32_t(now-badgeControlsUntil)>=0) { badgeControlsUntil=0; dirty=true; }
     }
-    const bool keepDisplayOn=(screen==Screen::Slides && usbControl.connected()) || (screen==Screen::SecurityKey && security_key::connected()) || security_key::awaiting() || (screen==Screen::Clock && settings.clockKeepAwake) ||
+    const bool keepDisplayOn=(screen==Screen::Clock && settings.clockKeepAwake) ||
         (screen==Screen::Badge && badgeApp.available() && settings.badgeKeepAwake);
     const bool dim=keepDisplayOn && !quickPanelOpen && !notes.busy() && uint32_t(now-lastInteraction)>20000 &&
         (screen!=Screen::Badge || uint32_t(now-badgeApp.lastMotion())>20000);
@@ -1667,13 +1617,10 @@ void loop() {
     if (!screenOff && !keepDisplayOn && !notes.busy() && !portal.active() && !companion.pairing() && !M5.BtnA.isPressed() && !M5.BtnB.isPressed() && !touch.isPressed() &&
         uint32_t(millis() - lastInteraction) > uint32_t(settings.screenTimeout) * 1000) {
         M5.Display.setBrightness(0);
+        M5.Display.sleep();
         sfx::stop();
         M5.Mic.end();
         screenOff = true;
-    }
-    if (!notes.busy() && !M5.Speaker.isPlaying() && !screenOff) {
-        if(screen==Screen::Badge || screen==Screen::Clock || screen==Screen::Focus || screen==Screen::Slides || screen==Screen::SecurityKey || musicScreen || badgeApp.uploading()) { if(M5.Mic.isRunning()) M5.Mic.end(); }
-        else notes.warmMicrophone();
     }
     if(quietSavePending && canSave()) {
         quietSaveFailed=!settings.save();quietSavePending=false;dirty=true;
@@ -1685,9 +1632,29 @@ void loop() {
         draw();
     }
     portal.update();
-    if(usbControl.update(((screen==Screen::UsbControl && !usbPaused) || screen==Screen::Slides) && !quickPanelOpen && !notes.busy(),companion.connected(),millis(),screen==Screen::Slides)) dirty=true;
+    if(usbControl.update(screen==Screen::UsbControl && !usbPaused && !quickPanelOpen && !notes.busy(),companion.connected(),millis())) dirty=true;
     companion.update();
     mqtt.update(screenOff);
     updateCpu(millis(),cpuWorkPending());
+    const bool timing=clockTimer.state()==clockwork::Timer::State::Running || chronometer.running() ||
+        focusSession.timer().state()==clockwork::Timer::State::Running;
+    // Entering needs two quiet seconds; leaving only a wake reason, because stopping the radios is itself work.
+    const bool rest=screenOff && !usbPower && !usbControl.connected() && !timing &&
+        (standby || (!cpuWorkPending() && uint32_t(millis()-lastCpuWork)>=2000));
+    if(rest!=standby) {
+        standby=rest;standbyAt=millis();
+        companion.rest(rest);
+        if(rest) WiFi.disconnect(true);
+        else {
+            // The sleep clock drifts; the hardware RTC does not.
+            if(M5.Rtc.isEnabled() && !M5.Rtc.getVoltLow()) { M5.Rtc.setSystemTimeFromRtc();applyRegion(settings); }
+            WiFi.mode(WIFI_STA);connectWifi();
+        }
+        Serial.printf("[power] standby=%d\n",standby);
+    }
     delay(5);
+    if(standby && companion.resting()) {
+        if(uint32_t(millis()-standbyAt)>=powerOffAfterMs) M5.Power.powerOff();
+        lightSleep();
+    }
 }

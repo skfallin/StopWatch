@@ -2,7 +2,7 @@
 
 [English — documentazione principale](README.md)
 
-Firmware della community per **M5Stack StopWatch C152**, con Companion iPhone e integrazione Home Assistant facoltativa. Note vocali, foto e GIF Badge, orologio, timer, cronometro, Focus, telecomando presentazioni e controllo mouse/tastiera USB.
+Firmware della community per **M5Stack StopWatch C152**, con Companion iPhone e integrazione Home Assistant facoltativa. Note vocali, foto e GIF Badge, orologio, timer, cronometro, Focus e controllo mouse/tastiera USB. A batteria il dispositivo riposa a schermo spento: le radio si fermano finché un pulsante o un tocco lo risveglia, e si spegne dopo due ore di inattività.
 
 **Candidata beta pubblica:** firmware `0.18.0-beta.1`, Companion `0.9.0` / build 22, protocollo BLE `1`. La preparazione della repo non implica che siano già pubblicati binari o un’app firmata. Non è un prodotto ufficiale M5Stack.
 

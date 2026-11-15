@@ -23,12 +23,4 @@ void focus(M5Canvas& c,const clockwork::Focus& model) {
     ui::pill(c,233,358,248,done?i18n::text("Continua"):running?i18n::text("Pausa"):timer.state()==clockwork::Timer::State::Paused?i18n::text("Riprendi"):i18n::text("Inizia"),ui::accent,ui::ink);
     ui::label(c,running?i18n::text("25 / 5 min · pausa lunga ogni 4"):i18n::text("Azzera sessione"),233,413,ui::Font::Small,ui::muted,ui::black,295);
 }
-void slides(M5Canvas& c,uint64_t elapsed,bool usb) {
-    header(c,"Slide",ui::Icon::Display);
-    ui::label(c,time(elapsed),233,219,ui::Font::Clock,ui::white);
-    ui::label(c,usb?i18n::text("Tempo presentazione"):i18n::text("Collega USB-C al computer"),233,262,ui::Font::Small,ui::muted,ui::black,300);
-    ui::circleButton(c,{149,326,42},ui::Icon::Back,30,ui::surface,usb?ui::white:ui::muted);
-    ui::circleButton(c,{317,326,42},ui::Icon::Next,30,ui::accent,usb?ui::ink:ui::muted);
-    ui::pill(c,233,408,230,i18n::text("Oscura / riprendi"),ui::surface,ui::white);
-}
 }

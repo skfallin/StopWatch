@@ -12,6 +12,7 @@ def function(path, signature):
 
 harness = r'''
 #include "i18n.h"
+#include "clock_model.h"
 #include <atomic>
 #include <algorithm>
 #include <ArduinoJson.h>
@@ -26,7 +27,7 @@ harness = r'''
 using String=std::string;
 uint32_t now=1000,lastCpuWork=0,frequency=240;
 bool screenOff=false,cpuScaling=true,clockWorks=true;
-enum class Screen { Home,Diagnostics,Clock,Badge,Timer,Stopwatch,SecurityKey,Focus,Slides };
+enum class Screen { Home,Diagnostics,Clock,Badge,Timer,Stopwatch,Focus };
 Screen screen=Screen::Home;
 bool quickPanelOpen=false,dirty=false;
 size_t diagnostic=0;
@@ -64,7 +65,8 @@ struct : Work {
     uint32_t lastMotion() const { return motionAt; }
 } badgeApp;
 Work usbControl;
-namespace security_key { bool busyFlag=false; bool busy() { return busyFlag; } bool awaitingFlag=false; bool awaiting() { return awaitingFlag; } bool connectedFlag=false; bool connected() { return connectedFlag; } }
+struct { bool on=false;bool running() const { return on; } } chronometer;
+struct { clockwork::Timer::State value=clockwork::Timer::State::Idle;auto state() const { return value; } } clockTimer;
 struct : Work { bool playingFlag=false;bool playing() const { return playingFlag; } } notes;
 struct {
     struct { bool playing=false;bool isPlaying() const { return playing; } } Speaker;
@@ -137,18 +139,18 @@ void idle() {
 }
 int main() {
     updateCpu(now,cpuWorkPending());assert(frequency==240 && changes.empty());
-    screenOff=true;now=2999;updateCpu(now,cpuWorkPending());assert(frequency==240);
-    now=3000;updateCpu(now,cpuWorkPending());assert(frequency==80 && changes.size()==1);
+    screenOff=true;now=1999;updateCpu(now,cpuWorkPending());assert(frequency==240);
+    now=2000;updateCpu(now,cpuWorkPending());assert(frequency==80 && changes.size()==1);
     updateCpu(now,false);assert(changes.size()==1);
-    screenOff=false;updateCpu(now,cpuWorkPending());assert(frequency==240);
+    // A lit but still screen rests too; only the frame being drawn borrows the fast clock.
+    screenOff=false;updateCpu(now,cpuWorkPending());assert(frequency==80);
+    updateCpu(now,cpuWorkPending(),true);assert(frequency==240);
     screenOff=true;idle();
     for(Work* work:{&home,&homeCommand,&portal,static_cast<Work*>(&badgeApp),&mqtt,&musicArtwork,&usbControl,static_cast<Work*>(&notes),&companion.relay_}) {
         companion.authenticated_=companion.subscribed_=true;
         work->work=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
         work->work=false;idle();
     }
-    security_key::busyFlag=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
-    security_key::busyFlag=false;idle();
     notes.playingFlag=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
     notes.playingFlag=false;idle();
     M5.Speaker.playing=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
@@ -187,7 +189,7 @@ int main() {
     now=36499;batteryTick();assert(M5.Power.reads==3);
     now=36500;batteryTick();assert(M5.Power.reads==4);
     cpuScaling=clockWorks=true;frequency=240;now=100000;lastCpuWork=now;
-    for(auto passive:{Screen::Focus,Screen::Slides}) { screen=passive;idle();assert(frequency==80); }
+    for(auto passive:{Screen::Home,Screen::Focus,Screen::Diagnostics}) { screen=passive;idle();assert(frequency==80); }
     screen=Screen::Clock;idle();
     const auto lastInteractionBoost=lastCpuWork;
     for(int frame=0;frame<120;++frame) {
@@ -199,8 +201,13 @@ int main() {
     M5.BtnA.pressed=false;idle();
     M5.Touch.count=1;updateCpu(++now,cpuWorkPending());assert(frequency==240);
     M5.Touch.count=0;idle();
-    quickPanelOpen=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
-    quickPanelOpen=false;idle();
+    quickPanelOpen=true;updateCpu(++now,cpuWorkPending());assert(frequency==80);quickPanelOpen=false;
+    screen=Screen::Stopwatch;idle();
+    chronometer.on=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
+    chronometer.on=false;idle();
+    screen=Screen::Timer;clockTimer.value=clockwork::Timer::State::Running;updateCpu(++now,cpuWorkPending());assert(frequency==240);
+    screenOff=true;idle();screenOff=false; // A running timer does not hold the clock behind a dark screen.
+    clockTimer.value=clockwork::Timer::State::Paused;idle();
     screen=Screen::Badge;badgeApp.motionAt=now-5000;idle();
     badgeApp.animatedFlag=true;updateCpu(++now,cpuWorkPending());assert(frequency==240);
     settings.badgeAnimate=false;idle();
@@ -230,12 +237,6 @@ int main() {
     assert(dimTick() && !displayDimmed);
     now+=20001;assert(dimTick() && displayDimmed);
     quickPanelOpen=true;assert(dimTick() && !displayDimmed);quickPanelOpen=false;
-    screen=Screen::Slides;usbControl.linked=true;lastInteraction=now;assert(dimTick() && !displayDimmed);
-    now+=20001;assert(dimTick() && displayDimmed && M5.Display.brightness==48);
-    usbControl.linked=false;assert(!dimTick() && !displayDimmed);
-    screen=Screen::SecurityKey;security_key::connectedFlag=true;assert(dimTick());
-    security_key::connectedFlag=false;assert(!dimTick());
-    security_key::awaitingFlag=true;assert(dimTick());security_key::awaitingFlag=false;
     JsonDocument input,output;String error;
     settings.clockKeepAwake=true;assert(updateClock(input.to<JsonObject>(),error) && settings.clockKeepAwake);
     for(const auto* invalid:{"null","0","1","\"true\"","{}","[]"}) {

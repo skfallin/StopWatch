@@ -22,8 +22,8 @@ int main() {
     assert(hour("Australia/Sydney",winter)==23 && hour("Australia/Sydney",summer)==22);
     assert(hour("Asia/Kolkata",winter)==17);
     tm local{};localtime_r(&winter,&local);assert(local.tm_min==30);
-    assert(std::strcmp(i18n::text("Impostazioni"),"Settings")==0);
+    assert(std::strcmp(i18n::text("Sistema"),"System")==0);
     i18n::italian=true;
-    assert(std::strcmp(i18n::text("Impostazioni"),"Impostazioni")==0);
+    assert(std::strcmp(i18n::text("Sistema"),"Sistema")==0);
     assert(std::strcmp(i18n::text("User's own label"),"User's own label")==0);
 }

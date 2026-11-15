@@ -87,9 +87,9 @@ int main() {
     assert(hit(Screen::Timer,306,clockActionY,1).action==Action::Select);
     assert(hit(Screen::Stopwatch,160,clockActionY,0).action==Action::Secondary);
     assert(hit(Screen::Stopwatch,306,clockActionY,0).action==Action::Select);
-    HomeMenu menu;menu.selected=2;
+    HomeMenu menu;menu.selected=4;
     assert(menu.app()==3);
-    assert((hit(Screen::Home,233,188,0,false,false,false,menu)==Target{Action::Open,0}));
+    assert((hit(Screen::Home,menu.circle(4).x,menu.circle(4).y,0,false,false,false,menu)==Target{Action::Open,4}));
     for(size_t i=0;i<clockwork::faceIds.size();++i) assert(clockwork::faceIndex(clockwork::faceIds[i])==int(i));
     assert(clockwork::faceIndex("unknown")==-1 && clockwork::faceIndex(std::string_view("halo\0bad",8))==-1);
     Controls buttons;

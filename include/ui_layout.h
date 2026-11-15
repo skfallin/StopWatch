@@ -2,6 +2,7 @@
 #include "i18n.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include "ui_sounds.h"
@@ -9,8 +10,8 @@
 
 namespace ui {
 inline bool confirmationReady(uint32_t now, uint32_t openedAt) { return uint32_t(now-openedAt)>=350; }
-enum class Screen { Home, System, SettingsMenu, SettingsSection, Settings, Diagnostics, HomeAssistant, Notes, NoteSaved, Badge,
-                    Pairing, Companion, ActionConfirm, FormatConfirm, ForgetConfirm, ClockMenu, Clock, Timer, Stopwatch, Spotify, MusicSources, MusicMenu, MusicPlaylists, UsbControl, SecurityKey, Light, LightConfirm, Focus, Slides };
+enum class Screen { Home, System, Settings, Diagnostics, HomeAssistant, Notes, NoteSaved, Badge,
+                    Pairing, Companion, ActionConfirm, FormatConfirm, ForgetConfirm, ClockMenu, Clock, Timer, Stopwatch, Spotify, MusicSources, MusicMenu, MusicPlaylists, UsbControl, Light, LightConfirm, Focus };
 enum class Action { None, Back, Select, Next, Previous, Open, Record, Play, Stop, Slider, Increase, Decrease, Secondary };
 struct Target {
     Action action = Action::None;
@@ -33,52 +34,27 @@ inline bool quickOrigin(int x,int y) { return x>=167 && x<=299 && y>=0 && y<=64;
 constexpr int homeCount=launcher::appCount;
 constexpr int clockActionY=347, clockTabsY=407;
 struct HomeMenu {
-    int space=1, selected=0;
-    bool apps=false;
+    int selected=0;
     std::array<int,launcher::appCount> order=launcher::defaultOrder;
     size_t enabled=launcher::appCount;
-    int count(int group) const {
-        int result=0;for(size_t i=0;i<enabled;++i) if(launcher::groups[order[i]]==group) ++result;
-        return result;
-    }
-    int count() const { return count(space); }
-    int pageCount() const { return int(count(0)>0)+int(count(1)>0)+int(count(2)>0); }
-    int visibleCount() const { return std::min(3,count()); }
-    int app(int slot=0) const {
-        int target=(selected+slot)%std::max(1,count());
-        for(size_t i=0;i<enabled;++i) if(launcher::groups[order[i]]==space && target--==0) return order[i];
-        return 7;
-    }
+    int count() const { return int(enabled); }
+    int app(int slot=0) const { return order[(selected+slot)%count()]; }
     void configure(const std::array<int,launcher::appCount>& items,size_t size) {
-        const bool changed=order!=items || enabled!=size;
-        const int previous=app();order=items;enabled=size;
-        if(!count()) nextSpace(1);
-        selected=0;if(!changed) for(int i=0;i<count();++i) if(app(i)==previous) { selected=i;break; }
-    }
-    void nextSpace(int direction) {
-        do { space=(space+3+direction)%3; } while(!count());
-        selected=0;apps=false;
+        const int previous=app();order=items;enabled=std::max<size_t>(1,size);
+        selected=0;for(int i=0;i<count();++i) if(order[i]==previous) { selected=i;break; }
     }
     void nextApp(int direction) { selected=(selected+count()+direction)%count(); }
+    // One page: every app sits on a fixed ring around the clock, the first at twelve o'clock.
     Circle circle(int slot) const {
-        if(visibleCount()==1) return {233,235,100};
-        if(slot==0) return {233,visibleCount()==2?174:188,visibleCount()==2?79:84};
-        return {visibleCount()==2?233:slot==1?130:336,visibleCount()==2?318:309,54};
+        const float angle=6.2831853f*float(slot)/float(count());
+        return {233+int(std::lround(165*std::sin(angle))),233-int(std::lround(165*std::cos(angle))),46};
     }
-    Circle arrow(bool next) const { return {next?389:77,visibleCount()==2?206:211,36}; }
 };
 constexpr Circle settingsPrevious{77,264,36}, settingsNext{389,264,36};
 constexpr Circle pagePrevious{154,387,36}, pageNext{312,387,36};
 constexpr Rect menuRow(int slot) { return {84,129+slot*112,298,91}; }
-constexpr Rect settingsRow(int slot) { return {84,125+slot*91,298,77}; }
-constexpr int settingsItems[3][4]={{0,5,0,0},{1,6,2,4},{3,0,0,0}};
-inline int settingsSection(int setting) { return setting==0 || setting==5?0:setting==3?2:1; }
-inline int settingsCount(int section) { return section==0?2:section==1?4:1; }
-inline int settingsPosition(int setting) {
-    const int section=settingsSection(setting);
-    for(int i=0;i<settingsCount(section);++i) if(settingsItems[section][i]==setting) return i;
-    return 0;
-}
+// Sistema rows: three sliders opened directly, then pairing, web setup and diagnostics.
+constexpr int systemCount=6, systemSettings[3]={0,1,3};
 constexpr Circle backButton{112,84,32}, previousButton{46,264,31}, nextButton{420,264,31};
 constexpr Circle recordButton{233,250,68}, stopButton{233,382,44};
 constexpr Circle musicPrevious{151,410,28}, musicPlay{233,416,33}, musicNext{315,410,28};
@@ -109,11 +85,6 @@ inline Target hit(Screen screen, int x, int y, int selected, bool recording = fa
         if(Rect{109,330,248,56}.contains(x,y)) return {Action::Select};
         if(Rect{109,389,248,46}.contains(x,y)) return {Action::Secondary};
         break;
-    case Screen::Slides:
-        if(Circle{149,326,42}.contains(x,y)) return {Action::Previous};
-        if(Circle{317,326,42}.contains(x,y)) return {Action::Next};
-        if(Rect{118,380,230,56}.contains(x,y)) return {Action::Select};
-        break;
     case Screen::Light:
         if(Rect{123,384,220,56}.contains(x,y)) return {Action::Select};
         if(Rect{84,310,298,66}.contains(x,y)) return {Action::Slider};
@@ -122,8 +93,6 @@ inline Target hit(Screen screen, int x, int y, int selected, bool recording = fa
         if(Rect{100,303,115,56}.contains(x,y)) return {Action::Back};
         if(Rect{252,303,115,56}.contains(x,y)) return {Action::Select};
         break;
-    case Screen::SecurityKey:
-        break; // Physical B is the only confirmation input.
     case Screen::UsbControl:
         if(Rect{113,342,240,60}.contains(x,y)) return {Action::Select};
         break;
@@ -154,9 +123,7 @@ inline Target hit(Screen screen, int x, int y, int selected, bool recording = fa
         break;
     }
     case Screen::Home:
-        for(int i=0;i<menu.visibleCount();++i) if(menu.circle(i).contains(x,y)) return {Action::Open,i};
-        if(menu.pageCount()>1 && menu.arrow(false).contains(x,y)) return {Action::Previous};
-        if(menu.pageCount()>1 && menu.arrow(true).contains(x,y)) return {Action::Next};
+        for(int i=0;i<menu.count();++i) if(menu.circle(i).contains(x,y)) return {Action::Open,i};
         break;
     case Screen::ClockMenu:
         for(int i=0;i<3;++i) if(Rect{85,132+i*86,296,72}.contains(x,y)) return {Action::Open,i};
@@ -189,19 +156,6 @@ inline Target hit(Screen screen, int x, int y, int selected, bool recording = fa
         if(pagePrevious.contains(x,y)) return {Action::Previous};
         if(pageNext.contains(x,y)) return {Action::Next};
         break;
-    case Screen::SettingsMenu:
-        for(int i=0;i<3;++i) if(settingsRow(i).contains(x,y)) return {Action::Open,settingsItems[i][0]};
-        break;
-    case Screen::SettingsSection: {
-        const int section=settingsSection(selected),first=settingsPosition(selected)/2*2;
-        for(int i=0;i<2 && first+i<settingsCount(section);++i)
-            if(menuRow(i).contains(x,y)) return {Action::Open,settingsItems[section][first+i]};
-        if(settingsCount(section)>2) {
-            if(pagePrevious.contains(x,y)) return {Action::Previous};
-            if(pageNext.contains(x,y)) return {Action::Next};
-        }
-        break;
-    }
     case Screen::HomeAssistant:
         if(lightControls && Rect{145,360,176,58}.contains(x,y)) return {Action::Open,99};
         if (previousButton.contains(x,y)) return {Action::Previous};

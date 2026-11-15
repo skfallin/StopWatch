@@ -21,6 +21,8 @@ public:
     bool begin();
     void update();
     bool hasWork();
+    void rest(bool on);
+    bool resting() const { return resting_ && !linked_; }
     void notesChanged() { notesChanged_ = true; }
     void openPairing();
     void closePairing();
@@ -72,6 +74,7 @@ private:
     phone::Relay relay_;
     size_t sent_ = 0;
     uint32_t connectedAt_ = 0, transferSession_ = 0;
+    bool resting_ = false;
     std::atomic<uint32_t> session_{0}, pairingUntil_{0}, passkey_{0};
     std::atomic<uint16_t> connection_{0};
     std::atomic<bool> linked_{false}, authenticated_{false}, reject_{false}, advertise_{false};

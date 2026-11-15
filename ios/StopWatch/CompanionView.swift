@@ -14,8 +14,8 @@ struct CompanionView: View {
     @State private var tab = ProcessInfo.processInfo.arguments.contains("--badge") ? 3 : 0
     @State private var pairing = false
     @State private var settings = false
-    @State private var diagnostics = false
     @State private var mqttSettings = false
+    @AppStorage("lastBattery") private var lastBattery = -1
     @ScaledMetric(relativeTo: .largeTitle) private var headline = 44
 
     var body: some View {
@@ -32,14 +32,21 @@ struct CompanionView: View {
                         Spacer(minLength: 8)
                         CircleButton(symbol: "slider.horizontal.3", label: String(localized: "Impostazioni", bundle: AppLocalization.bundle)) { settings = true }
                     }
-                    HStack(spacing: 8) {
-                        Image(systemName: connection.ready ? "link" : "link.badge.plus")
-                            .foregroundStyle(connection.ready ? Palette.orange : .white.opacity(0.7))
-                        Text("Bluetooth · " + connection.phase.title).font(.subheadline)
-                        Spacer()
-                        if connection.preview { Text(String(localized: "ANTEPRIMA", bundle: AppLocalization.bundle)).font(.caption2).foregroundStyle(.white.opacity(0.6)) }
+                    Button { pairing = true } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: connection.ready ? "link" : "link.badge.plus")
+                                .foregroundStyle(connection.ready ? Palette.orange : .white.opacity(0.7))
+                            Text("Bluetooth · " + connection.phase.title).font(.subheadline)
+                            Spacer()
+                            if connection.preview { Text(String(localized: "ANTEPRIMA", bundle: AppLocalization.bundle)).font(.caption2).foregroundStyle(.white.opacity(0.6)) }
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.5))
+                        }
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 16).frame(minHeight: 48)
+                        .background(.white.opacity(0.08), in: Capsule())
                     }
-                    .foregroundStyle(.white.opacity(0.85))
+                    .buttonStyle(.plain)
+                    .accessibilityHint(String(localized: "Collega StopWatch", bundle: AppLocalization.bundle))
                     if let error = connection.error {
                         HStack(alignment: .top) {
                             Image(systemName: "exclamationmark.circle")
@@ -63,26 +70,22 @@ struct CompanionView: View {
             .background(Palette.background)
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                HStack(spacing: 0) {
-                    CircleButton(symbol: "antenna.radiowaves.left.and.right", label: String(localized: "Collega StopWatch", bundle: AppLocalization.bundle), diameter: 44) { pairing = true }
-                    Spacer(minLength: 4)
-                    HStack(spacing: 2) {
-                        tabButton(0, "stopwatch", String(localized: "Dispositivo", bundle: AppLocalization.bundle))
-                        tabButton(1, "waveform", String(localized: "Note vocali", bundle: AppLocalization.bundle))
-                        tabButton(2, "house", String(localized: "Casa", bundle: AppLocalization.bundle))
-                        tabButton(3, "photo", "Badge")
-                        tabButton(4, "computermouse", String(localized: "Controllo USB", bundle: AppLocalization.bundle))
-                    }
-                    .padding(5).background(Color(white: 0.17), in: Capsule())
-                    Spacer(minLength: 4)
-                    CircleButton(symbol: "heart.text.square", label: String(localized: "Diagnostica hardware", bundle: AppLocalization.bundle), diameter: 44) { diagnostics = true }
+                HStack(spacing: 2) {
+                    tabButton(0, "stopwatch", String(localized: "Dispositivo", bundle: AppLocalization.bundle), String(localized: "Dispositivo", bundle: AppLocalization.bundle))
+                    tabButton(1, "waveform", String(localized: "Note", bundle: AppLocalization.bundle), String(localized: "Note vocali", bundle: AppLocalization.bundle))
+                    tabButton(2, "house", String(localized: "Casa", bundle: AppLocalization.bundle), String(localized: "Casa", bundle: AppLocalization.bundle))
+                    tabButton(3, "photo", "Badge", "Badge")
+                    tabButton(4, "computermouse", "USB", String(localized: "Controllo USB", bundle: AppLocalization.bundle))
                 }
-                .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)
+                .padding(5).background(Color(white: 0.17), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                .frame(maxWidth: 640)
+                .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
+                .frame(maxWidth: .infinity)
                 .background(Palette.background)
             }
-            .sheet(isPresented: $pairing) { PairingView() }
+            .sheet(isPresented: $pairing) { NavigationStack { PairingView() }.preferredColorScheme(.light).tint(.primary) }
             .sheet(isPresented: $settings) { SettingsSheet() }
-            .sheet(isPresented: $diagnostics) { DiagnosticsView() }
             .sheet(isPresented: $mqttSettings) {
                 NavigationStack {
                     if let configuration = connection.configuration {
@@ -96,12 +99,16 @@ struct CompanionView: View {
         .tint(Palette.orange)
     }
 
-    private func tabButton(_ index: Int, _ symbol: String, _ label: String) -> some View {
+    private func tabButton(_ index: Int, _ symbol: String, _ title: String, _ label: String) -> some View {
         Button { tab = index } label: {
-            Image(systemName: symbol).font(.system(size: 20, weight: .medium))
-                .frame(width: 44, height: 44)
-                .foregroundStyle(tab == index ? Palette.ink : .white)
-                .background(tab == index ? Palette.paper : .clear, in: Circle())
+            VStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 18, weight: .medium)).frame(height: 22)
+                Text(title).font(.caption2.weight(.medium)).lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .padding(.horizontal, 6).frame(maxWidth: .infinity, minHeight: 50)
+            .foregroundStyle(tab == index ? Palette.ink : .white.opacity(0.8))
+            .background(tab == index ? Palette.paper : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -129,9 +136,9 @@ struct CompanionView: View {
                         Text("Bluetooth").font(.subheadline.weight(.medium))
                     }
                 } else {
-                    Text(String(localized: "Un codice, una volta sola.", bundle: AppLocalization.bundle))
+                    Text(connection.hasRememberedDevice ? String(localized: "StopWatch sta riposando.", bundle: AppLocalization.bundle) : String(localized: "Un codice, una volta sola.", bundle: AppLocalization.bundle))
                         .font(.title3.weight(.medium))
-                    Text(String(localized: "Abbina il dispositivo e ritrova qui impostazioni, comandi e registrazioni.", bundle: AppLocalization.bundle))
+                    Text(connection.hasRememberedDevice ? String(localized: "A batteria spegne il Bluetooth quando lo schermo è spento. Premi un pulsante sullo StopWatch: l'app si ricollega da sola.", bundle: AppLocalization.bundle) : String(localized: "Abbina il dispositivo e ritrova qui impostazioni, comandi e registrazioni.", bundle: AppLocalization.bundle))
                         .font(.subheadline).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
                     Button { pairing = true } label: {
                         HStack { Text(connection.hasRememberedDevice ? String(localized: "Ricollega StopWatch", bundle: AppLocalization.bundle) : String(localized: "Abbina StopWatch", bundle: AppLocalization.bundle)); Spacer(); Image(systemName: "arrow.up.right") }
@@ -143,7 +150,7 @@ struct CompanionView: View {
                 }
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                MetricCard(title: String(localized: "Batteria", bundle: AppLocalization.bundle), value: batteryText, detail: connection.status?.charging == true ? String(localized: "In carica", bundle: AppLocalization.bundle) : String(localized: "Sul dispositivo", bundle: AppLocalization.bundle), symbol: "battery.75percent")
+                MetricCard(title: String(localized: "Batteria", bundle: AppLocalization.bundle), value: battery.map { "\($0)%" } ?? "—", detail: connection.status?.charging == true ? String(localized: "In carica", bundle: AppLocalization.bundle) : connection.status == nil && battery != nil ? String(localized: "Ultima lettura", bundle: AppLocalization.bundle) : String(localized: "Sul dispositivo", bundle: AppLocalization.bundle), symbol: connection.status?.charging == true ? "battery.100percent.bolt" : "battery.\(((battery ?? 75) + 12) / 25 * 25)percent")
                 Button { tab = 1 } label: {
                     MetricCard(title: String(localized: "Note vocali", bundle: AppLocalization.bundle), value: connection.status.map { String($0.notes) } ?? "—", detail: String(localized: "Idee da riascoltare", bundle: AppLocalization.bundle), symbol: "waveform")
                 }.buttonStyle(.plain)
@@ -165,9 +172,10 @@ struct CompanionView: View {
         }
     }
 
-    private var batteryText: String {
-        guard let value = connection.status?.battery, (0...100).contains(value) else { return "—" }
-        return "\(value)%"
+    // Live level, or the last one read before the watch went to rest.
+    private var battery: Int? {
+        let value = connection.status?.battery ?? lastBattery
+        return (0...100).contains(value) ? value : nil
     }
 
     private var homePage: some View {
@@ -240,12 +248,11 @@ struct PaperCard<Content: View>: View {
 private struct CircleButton: View {
     let symbol: String
     let label: String
-    var diameter: CGFloat = 52
     let action: () -> Void
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 20, weight: .medium))
-                .frame(width: diameter, height: diameter).foregroundStyle(Palette.ink)
+                .frame(width: 52, height: 52).foregroundStyle(Palette.ink)
                 .background(Palette.paper, in: Circle())
         }.buttonStyle(.plain).accessibilityLabel(label)
     }
@@ -328,11 +335,11 @@ private struct NotesPage: View {
                         .font(.body).foregroundStyle(Palette.secondary)
                 }
             }
-            HStack {
+            if !connection.notes.isEmpty { HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(Palette.secondary)
                 TextField(String(localized: "Cerca titoli e trascrizioni", bundle: AppLocalization.bundle), text: $query).accessibilityLabel(String(localized: "Cerca note", bundle: AppLocalization.bundle))
                 if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44) }.accessibilityLabel(String(localized: "Cancella ricerca", bundle: AppLocalization.bundle)) }
-            }.padding(.horizontal, 18).frame(minHeight: 56).background(.white, in: RoundedRectangle(cornerRadius: 22))
+            }.padding(.horizontal, 18).frame(minHeight: 56).background(.white, in: RoundedRectangle(cornerRadius: 22)) }
             if let titleError { Text(titleError).font(.footnote).foregroundStyle(.red) }
             if !connection.notes.isEmpty && filteredNotes.isEmpty { PaperCard { Text(String(localized: "Nessuna nota trovata.", bundle: AppLocalization.bundle)).foregroundStyle(Palette.secondary) } }
             ForEach(filteredNotes) { note in

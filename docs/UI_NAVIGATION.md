@@ -2,20 +2,21 @@
 
 [Italiano — detailed geometry reference](UI_NAVIGATION.it.md)
 
-Home groups: Home (Home/Spotify), Pocket (Notes/Badge/Clock/Focus), Tools (System/Bridge/Key/Slide). Companion can reorder and hide apps within groups; System always remains accessible. Key requires the separate LAB build.
+Home is a single page: up to eight apps (Home, Spotify, Notes, Badge, Clock, Focus, System, Bridge) sit on a ring around the clock, the first at twelve o'clock and the rest clockwise. Companion can reorder and hide them; System always remains accessible. System is one flat list: Brightness, Volume, Screen timeout, iPhone, Wi-Fi browser and Diagnostics.
 
 | Input | Action |
 |---|---|
 | Tap an app | Open it |
-| Horizontal swipe | Change group/page |
-| Vertical swipe on Home | Rotate app selection |
-| A / B on Home | Navigate groups/apps and open the selection |
+| Swipe on Home | Move the selection around the ring |
+| A / B on Home | A moves the selection, B opens it |
 | Hold A | Back/cancel |
 | Hold B, then release | Record a voice note, then save; wait for REC before speaking |
 | Hold A+B | Return to Home; save any ongoing note first |
 | Swipe down from top center | Quick settings: Do not disturb, brightness and interface volume |
 | Touch sleeping display | Wake without issuing the underlying action |
 
-The recording shortcut is excluded from the experimental Key confirmation screen. Sensitive/destructive operations require their physical confirmation. USB Slide uses A for previous, B for next and its touch blackout/resume control.
+On battery, the device rests when the screen turns off: Bluetooth and Wi-Fi pause until a button or touch wakes it, and it powers off after two idle hours. Companion shows the last battery reading and reconnects by itself after a wake. On USB power the radios stay on.
+
+Sensitive/destructive operations require their physical confirmation.
 
 English and Italian use the same geometry, icons and controls. Short labels are tested against the circular launcher boundaries. Messages and labels are translated before drawing; personal favorite names, note titles and track metadata remain unchanged.

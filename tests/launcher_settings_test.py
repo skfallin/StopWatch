@@ -22,8 +22,12 @@ int main() {
   assert(!deserializeJson(document,bad));assert(!update(document.as<JsonObjectConst>()));assert(settings.homeApps==launcher::defaultOrder && !settings.presentationPageKeys);
  }
  assert(!deserializeJson(document,R"({"home_apps":["system","focus","home"],"presentation_page_keys":true})"));
- assert(update(document.as<JsonObjectConst>()));assert(settings.homeAppCount==3 && settings.homeApps[0]==7 && settings.homeApps[1]==8 && settings.presentationPageKeys);
+ assert(update(document.as<JsonObjectConst>()));assert(settings.homeAppCount==3 && settings.homeApps[0]==launcher::system && settings.homeApps[1]==7 && settings.presentationPageKeys);
  assert(!deserializeJson(document,"{}"));assert(update(document.as<JsonObjectConst>()));assert(settings.homeAppCount==3 && settings.presentationPageKeys);
+ // A Companion that still lists the retired apps keeps working; they are simply dropped.
+ assert(!deserializeJson(document,R"({"home_apps":["key","home","spotify","notes","badge","clock","focus","system","usb","slides"]})"));
+ assert(update(document.as<JsonObjectConst>()));assert(settings.homeAppCount==launcher::appCount && settings.homeApps[0]==0 && settings.homeApps[7]==5);
+ assert(!deserializeJson(document,R"({"home_apps":["key","slides"]})"));assert(!update(document.as<JsonObjectConst>()));
 }
 '''
 with tempfile.TemporaryDirectory(prefix='stopwatch-launcher-') as folder:

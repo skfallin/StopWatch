@@ -2,7 +2,19 @@
 
 [English](UI_NAVIGATION.md)
 
-# Scene: navigazione approvata
+# Scene: navigazione
+
+## Home ad anello e riposo a batteria — 0.18.0-beta.1
+
+La Home è una sola pagina: fino a otto app (Casa, Spotify, Note, Badge, Orologio, Focus, Sistema, Ponte) stanno su un anello attorno all'orologio, la prima a ore dodici e le altre in senso orario. Solo l'app selezionata è piena; le altre sono contorni su nero, per accendere meno pixel AMOLED. A o uno swipe spostano la selezione, B o un tocco aprono l'app. Il Companion riordina e nasconde le app; Sistema resta sempre accessibile. Chiave e Slide non sono più nel launcher.
+
+Sistema è un elenco unico: Luminosità, Volume, Spegnimento schermo, iPhone, Browser Wi-Fi, Diagnostica. Valori predefiniti: luminosità 120, schermo spento dopo 20 secondi.
+
+A batteria, a schermo spento, il dispositivo riposa: Bluetooth e Wi-Fi si fermano finché un pulsante o un tocco lo risveglia; dopo due ore si spegne. Il Companion mostra l'ultima lettura della batteria e si ricollega da solo al risveglio. Con alimentazione USB le radio restano attive.
+
+Le sezioni seguenti descrivono le versioni precedenti (tre gruppi, dieci app) e restano come riferimento storico per geometrie, slider e avvisi.
+
+## Navigazione approvata — 0.17.1 (storico)
 
 Firmware sorgente **0.17.1-lab**; slider luminosità lineare scelto il 27 ottobre 2026. La versione scelta conserva le schermate Focus e riunisce le dieci applicazioni in tre gruppi, senza nome del gruppo o descrizione sopra i cerchi.
 
