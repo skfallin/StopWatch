@@ -5,7 +5,7 @@ struct PairingView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        Group {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
@@ -38,7 +38,7 @@ struct PairingView: View {
                         .disabled(connection.preview || connection.phase == .authorizing || connection.phase == .connecting)
                 }
                 Section(String(localized: "La prima volta", bundle: AppLocalization.bundle)) {
-                    Label(String(localized: "Sul dispositivo apri iPhone Bluetooth.", bundle: AppLocalization.bundle), systemImage: "1.circle")
+                    Label(String(localized: "Sul dispositivo apri Sistema → iPhone.", bundle: AppLocalization.bundle), systemImage: "1.circle")
                     Label(String(localized: "Premi B per mostrare il codice a sei cifre.", bundle: AppLocalization.bundle), systemImage: "2.circle")
                     Label(String(localized: "Scegli StopWatch qui sopra. Inserisci il codice nella richiesta di iOS.", bundle: AppLocalization.bundle), systemImage: "3.circle")
                 }
@@ -104,7 +104,7 @@ struct SettingsSheet: View {
                     Section {
                         Button(String(localized: "Dimentica su questa app", bundle: AppLocalization.bundle), role: .destructive) { forgetting = true }
                     } footer: {
-                        Text(String(localized: "Per revocare le chiavi anche sullo StopWatch apri iPhone Bluetooth → Rimuovi sul dispositivo. Poi dissocia StopWatch nelle impostazioni Bluetooth di iPhone.", bundle: AppLocalization.bundle))
+                        Text(String(localized: "Per revocare le chiavi anche sullo StopWatch apri Sistema → iPhone → Rimuovi abbinamenti sul dispositivo. Poi dissocia StopWatch nelle impostazioni Bluetooth di iPhone.", bundle: AppLocalization.bundle))
                     }
                 }
             }
@@ -198,7 +198,6 @@ struct ConfigurationEditor: View {
             if part == .badge { badgeFields }
             if part == .clock { clockFields }
             if part == .launcher { launcherFields }
-            if part == .presentation { presentationFields }
             if let error { Section { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red) } }
         }
         .navigationTitle(part == .mqtt ? "MQTT" : part.title).navigationBarTitleDisplayMode(.inline)
@@ -248,7 +247,7 @@ struct ConfigurationEditor: View {
                 }
                 LabeledContent(String(localized: "Luminosità", bundle: AppLocalization.bundle), value: "\(draft.brightness * 100 / 255)%")
                 Slider(value: numberBinding(\.brightness), in: 16...255, step: 1).accessibilityLabel(String(localized: "Luminosità", bundle: AppLocalization.bundle))
-                Stepper(String(localized: "Si spegne dopo \(draft.screenTimeout) secondi", bundle: AppLocalization.bundle), value: $draft.screenTimeout, in: 15...300, step: 15)
+                Stepper(String(localized: "Si spegne dopo \(draft.screenTimeout) secondi", bundle: AppLocalization.bundle)) { draft.stepScreenTimeout(1) } onDecrement: { draft.stepScreenTimeout(-1) }
             }
             Section("Feedback") {
                 Picker(String(localized: "Pacchetto suoni", bundle: AppLocalization.bundle), selection: $draft.soundPack) {
@@ -299,10 +298,7 @@ struct ConfigurationEditor: View {
                 ForEach(draft.homeApps, id: \.self) { id in
                     if let app = HomeApplication(rawValue: id) {
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(app.title)
-                                Text(app.group).font(.caption).foregroundStyle(.secondary)
-                            }
+                            Text(app.title)
                             Spacer()
                             if app == .system { Image(systemName: "lock").foregroundStyle(.secondary) }
                             else { Button { draft.homeApps.removeAll { $0 == id } } label: { Image(systemName: "eye.slash").frame(width: 44, height: 44) }.buttonStyle(.borderless).accessibilityLabel(String(localized: "Nascondi ", bundle: AppLocalization.bundle) + app.title) }
@@ -310,7 +306,7 @@ struct ConfigurationEditor: View {
                     }
                 }.onMove { source, destination in draft.homeApps.move(fromOffsets: source, toOffset: destination) }
             } header: { Text(String(localized: "Applicazioni visibili", bundle: AppLocalization.bundle)) } footer: {
-                Text(String(localized: "Tocca Modifica per riordinare. L'ordine si applica all'interno di ogni gruppo: la prima app diventa quella grande. I gruppi vuoti vengono saltati; Sistema resta sempre accessibile.", bundle: AppLocalization.bundle))
+                Text(String(localized: "Tocca Modifica per riordinare. L'ordine è quello dell'anello sulla Home, in senso orario dall'alto. Sistema resta sempre accessibile.", bundle: AppLocalization.bundle))
             }
             Section(String(localized: "Applicazioni nascoste", bundle: AppLocalization.bundle)) {
                 ForEach(HomeApplication.allCases.filter { !draft.homeApps.contains($0.rawValue) }) { app in
@@ -318,14 +314,6 @@ struct ConfigurationEditor: View {
                 }
             }
             Section { Button(String(localized: "Ripristina disposizione", bundle: AppLocalization.bundle)) { draft.homeApps = HomeApplication.allCases.map(\.rawValue) } }
-        }
-    }
-
-    private var presentationFields: some View {
-        Section {
-            Toggle(String(localized: "Usa Pagina su / Pagina giù", bundle: AppLocalization.bundle), isOn: $draft.presentationPageKeys)
-            Text(String(localized: "Disattivato: invia le frecce sinistra/destra. Attivato: invia Pagina su/giù. Apri Slide sullo StopWatch collegato via USB: A torna indietro, B avanza; il comando touch Oscura / riprendi invia B. Il computer deve avere la presentazione in primo piano.", bundle: AppLocalization.bundle))
-                .font(.footnote).foregroundStyle(.secondary)
         }
     }
 
@@ -406,10 +394,9 @@ struct ConfigurationEditor: View {
 
 struct DiagnosticsView: View {
     @EnvironmentObject private var connection: WatchConnection
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        Group {
             List {
                 if let status = connection.status {
                     Section(String(localized: "Collegamenti", bundle: AppLocalization.bundle)) {
@@ -450,7 +437,6 @@ struct DiagnosticsView: View {
                 }
             }
             .navigationTitle(String(localized: "Diagnostica", bundle: AppLocalization.bundle)).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(String(localized: "Fine", bundle: AppLocalization.bundle)) { dismiss() } } }
             .refreshable { await connection.refresh() }
         }
         .preferredColorScheme(.light).tint(.primary)

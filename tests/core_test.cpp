@@ -137,49 +137,32 @@ void touchNavigation() {
             assert((Circle{233,233,216}.contains(x,y)));
     assert(noticeCard.contains(233,149) && !noticeCard.contains(233,310));
     HomeMenu menu;
-    bool reachable[homeCount]={};
-    for(int space=0;space<3;++space) {
-        menu.space=space;
-        int top=466,bottom=0,left=466,right=0;
-        for(int slot=0;slot<menu.visibleCount();++slot) {
+    // Any enabled subset stays one page: on the round glass, apart, and around the clock.
+    for(size_t enabled=1;enabled<=launcher::appCount;++enabled) {
+        menu.configure(launcher::defaultOrder,enabled);
+        bool reachable[homeCount]={};
+        const int start=menu.selected; // configure keeps the highlighted app
+        for(int slot=0;slot<menu.count();++slot) {
             const auto circle=menu.circle(slot);
-            top=std::min(top,circle.y-circle.radius);bottom=std::max(bottom,circle.y+circle.radius);
-            left=std::min(left,circle.x-circle.radius);right=std::max(right,circle.x+circle.radius);
+            const int dx=circle.x-233,dy=circle.y-233;
+            assert(dx*dx+dy*dy<=(216-circle.radius)*(216-circle.radius));
+            assert(dx*dx+dy*dy>=(110+circle.radius)*(110+circle.radius));
             assert((hit(Screen::Home,circle.x,circle.y,0,false,false,false,menu)==Target{Action::Open,slot}));
-
-        }
-        assert(std::abs(left+right-466)<=1 && std::abs(top+bottom-466)<=1);
-        for(bool next:{false,true}) {
-            const auto arrow=menu.arrow(next);
-            assert(arrow.radius>=36);
-            assert(hit(Screen::Home,arrow.x,arrow.y,0,false,false,false,menu).action==(next?Action::Next:Action::Previous));
-            for(int slot=0;slot<menu.visibleCount();++slot) {
-                const auto circle=menu.circle(slot);
-                assert((circle.x-arrow.x)*(circle.x-arrow.x)+(circle.y-arrow.y)*(circle.y-arrow.y)>
-                    (circle.radius+arrow.radius)*(circle.radius+arrow.radius));
+            for(int other=0;other<slot;++other) {
+                const auto next=menu.circle(other);
+                assert((circle.x-next.x)*(circle.x-next.x)+(circle.y-next.y)*(circle.y-next.y)>4*circle.radius*circle.radius);
             }
+            reachable[menu.app()]=true;menu.nextApp(1);
         }
-        for(int slot=0;slot<menu.count();++slot) reachable[menu.app(slot)]=true;
-        const int first=menu.app();
-        menu.apps=true;menu.nextApp(-1);menu.nextApp(1);assert(menu.app()==first);
-        menu.nextSpace(1);assert(!menu.apps && menu.selected==0);
+        assert(menu.selected==start && size_t(std::count(reachable,reachable+homeCount,true))==enabled);
+        menu.selected=0;menu.nextApp(-1);assert(menu.selected==menu.count()-1);
     }
-    for(bool app:reachable) assert(app);
+    assert(hit(Screen::Home,233,233,0,false,false,false,menu).action==Action::None);
     assert(hit(Screen::Home,0,0,0).action==Action::None);
     assert(hit(Screen::Home,-32768,-32768,0).action==Action::None);
-    assert(homeCount==10);
+    assert(homeCount==8 && !launcher::retired("system") && launcher::retired("key") && launcher::retired("slides"));
     assert((hit(Screen::System,233,174,2)==Target{Action::Open,2}));
-    assert((hit(Screen::System,233,286,3)==Target{Action::Open,3}));
-    for(int section=0;section<3;++section) {
-        const auto row=settingsRow(section);
-        assert((hit(Screen::SettingsMenu,233,row.y+row.height/2,0)==Target{Action::Open,settingsItems[section][0]}));
-        for(int i=0;i<settingsCount(section);++i) {
-            const int setting=settingsItems[section][i];
-            assert(settingsSection(setting)==section && settingsPosition(setting)==i);
-            const auto bounds=menuRow(i%2);
-            assert((hit(Screen::SettingsSection,233,bounds.y+bounds.height/2,setting)==Target{Action::Open,setting}));
-        }
-    }
+    assert((hit(Screen::System,233,286,5)==Target{Action::Open,5}));
     assert(hit(Screen::UsbControl,233,372,0).action==Action::Select);
     assert(hit(Screen::UsbControl,112,84,0).action==Action::Back);
     assert(hit(Screen::UsbControl,233,200,0).action==Action::None);
@@ -191,7 +174,7 @@ void touchNavigation() {
     assert(hit(Screen::Settings,389,264,0).action==Action::Next);
     for(int y=310;y<376;++y) for(int x=84;x<382;++x)
         assert(hit(Screen::Settings,x,y,0).action==Action::Slider);
-    for(auto screen:{Screen::FormatConfirm,Screen::ForgetConfirm,Screen::SecurityKey}) {
+    for(auto screen:{Screen::FormatConfirm,Screen::ForgetConfirm}) {
         for(int y=0;y<466;y+=3) for(int x=0;x<466;x+=3) {
             const auto action=hit(screen,x,y,0).action;
             assert(action==Action::None || action==Action::Back);

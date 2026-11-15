@@ -11,7 +11,7 @@ The firmware is Arduino ESP32 on ESP-IDF/FreeRTOS, with M5Unified/M5GFX for C152
 - `src/voice_notes.*`, `badge.*`, `ui_sounds.*`: LittleFS content with validation, bounded memory and preservation of user files. Partition layout stays unchanged.
 - `src/companion.*`: authenticated BLE protocol 1. `note_transfer.*` negotiates per-transfer HTTPS tickets/certificate pinning through BLE.
 - `src/home_assistant.*`, `mqtt_bridge.*`: direct HTTP(S)/MQTT integration. `ios/StopWatch/HomeRelay.swift` provides the optional phone bridge.
-- `src/usb_control.*`: HID keyboard/mouse and standalone presentation remote. `security_key.cpp` supplies inert stubs in the normal build; `STOPWATCH_FIDO_LAB` enables the test authenticator.
+- `src/usb_control.*`: HID keyboard/mouse for the iPhone bridge. `security_key.cpp` supplies inert stubs in the normal build; `STOPWATCH_FIDO_LAB` enables the test authenticator.
 - `web/portal.html`: local portal source; generated into a firmware header with reviewed translations.
 
 Device settings, user names, entity IDs and protocol keys remain distinct from translated messages. iPhone models preserve optional configuration fields; saving one editor rereads current configuration and modifies only that section. The firmware publishes the supported time-zone IDs rather than duplicating that list in clients.

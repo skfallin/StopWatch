@@ -58,6 +58,9 @@ bool Companion::begin() {
     advertising->setScanResponse(true);
     advertising->setMinPreferred(0x0c);
     advertising->setMaxPreferred(0x18);
+    // 211.25 ms, one of the intervals iOS scans for in the background.
+    advertising->setMinInterval(338);
+    advertising->setMaxInterval(338);
     advertising->start();
     // Invalidate cached handles on bonded peers after a firmware restart, without deleting bonds.
     ble_svc_gatt_changed(1,0xffff);
@@ -147,7 +150,8 @@ void Companion::onAuthenticationComplete(ble_gap_conn_desc* result) {
     if (secure && !reject_ && (pairing() || knownPeer_)) {
         authenticated_ = true;
         pairingUntil_ = 0;
-        server_->requestConnParams(result->conn_handle, 12, 24, 0, 600);
+        // Latency lets an idle link skip four of five radio events without slowing transfers.
+        server_->requestConnParams(result->conn_handle, 12, 24, 4, 600);
     } else reject_ = true;
 }
 
@@ -354,6 +358,14 @@ bool Companion::hasWork() {
         (packets_ && uxQueueMessagesWaiting(packets_)) || relay_.pending()));
 }
 
+void Companion::rest(bool on) {
+    if (!server_) return;
+    resting_ = on;
+    // Light sleep stalls the radio clock: leave no link or advertisement scheduled.
+    if (on) { if (linked_) server_->disconnect(connection_); BLEDevice::getAdvertising()->stop(); }
+    else advertise_ = true;
+}
+
 void Companion::update() {
     if (!server_) return;
     if (pairingUntil_ && !pairing()) closePairing();
@@ -369,7 +381,7 @@ void Companion::update() {
         resetTransfer();
         return;
     }
-    if (advertise_.exchange(false)) server_->startAdvertising();
+    if (advertise_.exchange(false) && !resting_) server_->startAdvertising();
     if (!connected() || !subscribed_) return;
     MousePacket mousePacket;
     while(xQueueReceive(mousePackets_,&mousePacket,0)==pdTRUE)

@@ -11,13 +11,13 @@ enum AppLocalization {
 }
 
 enum SettingsPart: String, CaseIterable, Identifiable {
-    case device, wifi, home, mqtt, badge, clock, launcher, presentation, regional
+    case device, wifi, home, mqtt, badge, clock, launcher, regional
     var id: Self { self }
     var title: String {
-        switch self { case .regional: String(localized: "Lingua e fuso orario", bundle: AppLocalization.bundle); case .device: String(localized: "Display e feedback", bundle: AppLocalization.bundle); case .wifi: "Wi-Fi"; case .home: String(localized: "Preferiti Home Assistant", bundle: AppLocalization.bundle); case .mqtt: String(localized: "Integrazione Home Assistant", bundle: AppLocalization.bundle); case .badge: "Badge"; case .clock: String(localized: "Orologio", bundle: AppLocalization.bundle); case .launcher: String(localized: "Home e applicazioni", bundle: AppLocalization.bundle); case .presentation: String(localized: "Presentazioni", bundle: AppLocalization.bundle) }
+        switch self { case .regional: String(localized: "Lingua e fuso orario", bundle: AppLocalization.bundle); case .device: String(localized: "Display e feedback", bundle: AppLocalization.bundle); case .wifi: "Wi-Fi"; case .home: String(localized: "Preferiti Home Assistant", bundle: AppLocalization.bundle); case .mqtt: String(localized: "Integrazione Home Assistant", bundle: AppLocalization.bundle); case .badge: "Badge"; case .clock: String(localized: "Orologio", bundle: AppLocalization.bundle); case .launcher: String(localized: "Home e applicazioni", bundle: AppLocalization.bundle) }
     }
     var symbol: String {
-        switch self { case .regional: "globe"; case .device: "slider.horizontal.3"; case .wifi: "wifi"; case .home: "star"; case .mqtt: "house"; case .badge: "photo.badge.checkmark"; case .clock: "clock"; case .launcher: "circle.grid.2x2"; case .presentation: "display" }
+        switch self { case .regional: "globe"; case .device: "slider.horizontal.3"; case .wifi: "wifi"; case .home: "star"; case .mqtt: "house"; case .badge: "photo.badge.checkmark"; case .clock: "clock"; case .launcher: "circle.grid.2x2" }
     }
 }
 
@@ -54,13 +54,10 @@ struct BadgeUpload: Codable { let upload: String }
 struct BadgeChunk: Encodable { let upload: String; let offset: Int; let chunk: String }
 
 enum HomeApplication: String, CaseIterable, Identifiable {
-    case home, spotify, notes, badge, clock, focus, system, usb, key, slides
+    case home, spotify, notes, badge, clock, focus, system, usb
     var id: String { rawValue }
     var title: String {
-        switch self { case .home: String(localized: "Casa", bundle: AppLocalization.bundle); case .spotify: "Spotify"; case .notes: String(localized: "Note", bundle: AppLocalization.bundle); case .badge: "Badge"; case .clock: String(localized: "Orologio", bundle: AppLocalization.bundle); case .focus: "Focus"; case .system: String(localized: "Sistema", bundle: AppLocalization.bundle); case .usb: String(localized: "Ponte", bundle: AppLocalization.bundle); case .key: String(localized: "Chiave", bundle: AppLocalization.bundle); case .slides: "Slide" }
-    }
-    var group: String {
-        switch self { case .home, .spotify: String(localized: "Casa", bundle: AppLocalization.bundle); case .notes, .badge, .clock, .focus: String(localized: "Tasca", bundle: AppLocalization.bundle); default: String(localized: "Strumenti", bundle: AppLocalization.bundle) }
+        switch self { case .home: String(localized: "Casa", bundle: AppLocalization.bundle); case .spotify: "Spotify"; case .notes: String(localized: "Note", bundle: AppLocalization.bundle); case .badge: "Badge"; case .clock: String(localized: "Orologio", bundle: AppLocalization.bundle); case .focus: "Focus"; case .system: String(localized: "Sistema", bundle: AppLocalization.bundle); case .usb: String(localized: "Ponte", bundle: AppLocalization.bundle) }
     }
 }
 
@@ -69,8 +66,7 @@ struct DeviceConfiguration: Codable, Equatable {
     var timeZone = "UTC"
     var timeZones: [String] = []
     var homeApps = HomeApplication.allCases.map(\.rawValue)
-    var presentationPageKeys = false
-    var brightness = 160
+    var brightness = 120
     var volume = 80
     var noteVolume = 80
     var soundPack = "microclick"
@@ -79,7 +75,7 @@ struct DeviceConfiguration: Codable, Equatable {
     var clockFace = "digital"
     var clockKeepAwake = false
     var vibration = 120
-    var screenTimeout = 45
+    var screenTimeout = 20
     var ssid = ""
     var wifiPassword = ""
     var wifiPasswordSaved = false
@@ -98,7 +94,7 @@ struct DeviceConfiguration: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case language, timeZone = "time_zone", timeZones = "time_zones"
-        case homeApps = "home_apps", presentationPageKeys = "presentation_page_keys"
+        case homeApps = "home_apps"
         case brightness, volume, vibration, ssid, favorites
         case noteVolume = "note_volume"
         case soundPack = "sound_pack", colorTheme = "color_theme", badge
@@ -111,11 +107,15 @@ struct DeviceConfiguration: Codable, Equatable {
 
     init() {}
 
+    // The device slider moves in 15 s steps; its 20 s default sits between them.
+    mutating func stepScreenTimeout(_ direction: Int) {
+        screenTimeout = min(300, max(15, direction > 0 ? (screenTimeout / 15 + 1) * 15 : (screenTimeout - 1) / 15 * 15))
+    }
+
     mutating func apply(_ edited: DeviceConfiguration, part: SettingsPart) {
         switch part {
         case .regional: language = edited.language; timeZone = edited.timeZone
         case .launcher: homeApps = edited.homeApps
-        case .presentation: presentationPageKeys = edited.presentationPageKeys
         case .device:
             brightness = edited.brightness; volume = edited.volume
             noteVolume = edited.noteVolume
@@ -140,7 +140,6 @@ struct DeviceConfiguration: Codable, Equatable {
         timeZone = try values.decodeIfPresent(String.self, forKey: .timeZone) ?? "Europe/Rome"
         timeZones = try values.decodeIfPresent([String].self, forKey: .timeZones) ?? []
         homeApps = try values.decodeIfPresent([String].self, forKey: .homeApps) ?? HomeApplication.allCases.map(\.rawValue)
-        presentationPageKeys = try values.decodeIfPresent(Bool.self, forKey: .presentationPageKeys) ?? false
         brightness = try values.decode(Int.self, forKey: .brightness)
         volume = try values.decode(Int.self, forKey: .volume)
         noteVolume = try values.decodeIfPresent(Int.self, forKey: .noteVolume) ?? volume

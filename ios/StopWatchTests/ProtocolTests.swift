@@ -2,7 +2,7 @@ import XCTest
 @testable import StopWatch
 
 final class ProtocolTests: XCTestCase {
-    func testHomeAndPresentationEditsPreserveOtherConfiguration() throws {
+    func testHomeEditsPreserveOtherConfiguration() throws {
         var current = DeviceConfiguration(), edited = DeviceConfiguration()
         current.volume = 180; current.clockFace = "halo"
         current.favorites = [Favorite(label: "Studio", entity: "light.studio")]
@@ -11,13 +11,22 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(current.homeApps, edited.homeApps)
         XCTAssertEqual(current.volume, 180); XCTAssertEqual(current.clockFace, "halo")
         XCTAssertEqual(current.favorites.first?.entity, "light.studio")
-        edited.presentationPageKeys = true; current.apply(edited, part: .presentation)
         let restored = try JSONDecoder().decode(DeviceConfiguration.self, from: JSONEncoder().encode(current))
-        XCTAssertTrue(restored.presentationPageKeys); XCTAssertEqual(restored.homeApps, edited.homeApps)
+        XCTAssertEqual(restored.homeApps, edited.homeApps)
         var old = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(current)) as? [String: Any])
-        old.removeValue(forKey: "home_apps"); old.removeValue(forKey: "presentation_page_keys")
+        old.removeValue(forKey: "home_apps"); old["presentation_page_keys"] = true // Older firmware still sends it.
         let legacy = try JSONDecoder().decode(DeviceConfiguration.self, from: JSONSerialization.data(withJSONObject: old))
-        XCTAssertEqual(legacy.homeApps, HomeApplication.allCases.map(\.rawValue)); XCTAssertFalse(legacy.presentationPageKeys)
+        // The firmware ring order, first app at twelve o'clock.
+        XCTAssertEqual(legacy.homeApps, ["home", "spotify", "notes", "badge", "clock", "focus", "system", "usb"])
+    }
+
+    func testScreenTimeoutStepsOnTheDeviceGrid() {
+        var settings = DeviceConfiguration()
+        XCTAssertEqual(settings.screenTimeout, 20)
+        settings.stepScreenTimeout(1); XCTAssertEqual(settings.screenTimeout, 30)
+        settings.stepScreenTimeout(-1); settings.stepScreenTimeout(-1); XCTAssertEqual(settings.screenTimeout, 15)
+        settings.screenTimeout = 20; settings.stepScreenTimeout(-1); XCTAssertEqual(settings.screenTimeout, 15)
+        settings.screenTimeout = 300; settings.stepScreenTimeout(1); XCTAssertEqual(settings.screenTimeout, 300)
     }
 
     func testMicroclickMigrationPreservesSilenceAndOtherSettings() throws {

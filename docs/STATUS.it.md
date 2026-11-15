@@ -20,6 +20,14 @@ Perimetro: C152, firmware/portale/Companion inglese e italiano, fuso configurabi
 
 Nessun caricamento sul dispositivo, registrazione di credenziali, distribuzione dell’app o cambio di visibilità della repo. Nessun simulatore iOS era avviato per la prova visiva interattiva. Gli esiti CI di ogni revisione inviata sono disponibili in [GitHub Actions](https://github.com/skfallin/StopWatch/actions); i risultati locali sopra riportati non certificano la CI remota.
 
+## Aggiornamento — 15 novembre 2026
+
+Novità: Home ad anello unico con otto app (Chiave e Slide escono dal launcher), Sistema in un solo elenco, valori predefiniti luminosità 120 e schermo spento dopo 20 s, riposo a batteria a schermo spento (radio ferme, spegnimento dopo due ore di inattività). Il Companion si allinea: otto app, niente impostazioni Presentazioni, schede con etichetta, abbinamento dalla riga Bluetooth, ultima lettura della batteria mentre il dispositivo riposa, nessun errore di abbinamento durante l'attesa.
+
+- Suite C++/Python e **46 test Swift** passati; build iOS per simulatore senza firma riuscita.
+- Prima schermata del Companion vista nel simulatore in anteprima (italiano), stati nuovo e abbinato-a-riposo. Altre schede, Impostazioni e testo grande non sono stati visti.
+- Firmware normale installato su un C152 con caricamento ordinario (senza erase/uploadfs). Ingresso/uscita dal riposo, riconnessione Bluetooth/Wi-Fi al risveglio, riaccensione dopo lo spegnimento e autonomia reale **non sono ancora misurati**.
+
 ## Prima della pubblicazione
 
 - [ ] Rivedere e versionare i file previsti, inclusi nuovi sorgenti vendorizzati, licenze e risorse generate; ricontrollare la revisione esatta.
@@ -27,7 +35,8 @@ Nessun caricamento sul dispositivo, registrazione di credenziali, distribuzione 
 - [ ] Controllare entrambe le lingue nelle schermate, nel portale e nel Companion, anche con testo iOS grande.
 - [ ] Verificare note HTTPS/BLE, trascrizione inglese/italiana e gestione di permessi/modelli mancanti.
 - [ ] Verificare Badge, interruzioni di trasferimento, Casa/Spotify e ponte con iPhone bloccato.
-- [ ] Verificare tastiere USB US/italiana, puntatore, disconnessione e Slide; FIDO soltanto nella build LAB e con account sacrificabili.
+- [ ] Verificare tastiere USB US/italiana, puntatore e disconnessione; FIDO soltanto nella build LAB e con account sacrificabili.
+- [ ] Verificare il riposo a batteria: ingresso dopo il timeout, risveglio da pulsante/tocco, riconnessione di Companion e Wi-Fi, spegnimento dopo due ore e riaccensione; confrontare l'autonomia con la build precedente.
 - [ ] Abilitare la segnalazione privata delle vulnerabilità GitHub, rivedere metadati, storico, vecchi asset ed eventuali log/artifact remoti.
 - [ ] Eseguire la revisione committata in CI e generare binari/checksum da quella revisione; pubblicare solo come operazione esplicita.
 

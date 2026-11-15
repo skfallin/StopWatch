@@ -14,6 +14,7 @@
 "2 · Apri la pagina" = "2 · Open the page";
 "25 / 5 min · pausa lunga ogni 4" = "25 / 5 min · long break every 4";
 "466 × 466" = "466 × 466";
+"A batteria spegne il Bluetooth quando lo schermo è spento. Premi un pulsante sullo StopWatch: l'app si ricollega da sola." = "On battery it turns Bluetooth off while the screen is off. Press a button on StopWatch: the app reconnects by itself.";
 "A chiude · B cambia" = "A closes · B changes";
 "A lungo · Esci" = "Hold A · Exit";
 "A portata\ndi mano." = "Within\nreach.";
@@ -228,7 +229,7 @@
 "Connessione fallita" = "Connection failed";
 "Connessione interrotta" = "Connection lost";
 "Connessione interrotta. Verifica l'esito prima di ripetere il comando." = "Connection lost. Check the outcome before repeating the command.";
-"Connessione non completata. Sullo StopWatch apri iPhone Bluetooth e premi B per abbinare." = "Connection incomplete. Open iPhone Bluetooth on StopWatch and press B to pair.";
+"Connessione non completata. Sullo StopWatch apri Sistema → iPhone e premi B per abbinare." = "Connection incomplete. On StopWatch open System → iPhone and press B to pair.";
 "Connessione…" = "Connecting…";
 "Connesso" = "Connected";
 "Consenti Riconoscimento vocale in Impostazioni iPhone → StopWatch, poi tocca Riprova." = "Allow Speech Recognition in iPhone Settings → StopWatch, then tap Retry.";
@@ -257,7 +258,6 @@
 "Dati aggiuntivi nel Badge." = "Unexpected trailing data in Badge.";
 "Destro" = "Right";
 "Diagnostica" = "Diagnostics";
-"Diagnostica hardware" = "Hardware diagnostics";
 "Digitale" = "Digital";
 "Dimensione blocco non valida" = "Invalid block size";
 "Dimensione del file inattesa" = "Unexpected file size";
@@ -265,7 +265,6 @@
 "Dimentica su questa app" = "Forget in this app";
 "Dimenticare questo StopWatch nell'app?" = "Forget this StopWatch in the app?";
 "Disattivato" = "Off";
-"Disattivato: invia le frecce sinistra/destra. Attivato: invia Pagina su/giù. Apri Slide sullo StopWatch collegato via USB: A torna indietro, B avanza; il comando touch Oscura / riprendi invia B. Il computer deve avere la presentazione in primo piano." = "Off: sends left/right arrows. On: sends Page Up/Down. Open Slide on StopWatch connected over USB: A goes back, B advances; the Blackout / resume touch control sends B. The presentation must be in the foreground on the computer.";
 "Disattivato: segue il timeout del dispositivo. Attivato: resta visibile e abbassa la luminosità dopo 20 secondi di inattività. Foto ferme non vengono ridisegnate; i sensori rallentano quando il dispositivo è fermo." = "Off: follows the device timeout. On: stays visible and dims after 20 seconds of inactivity. Still photos are not redrawn; sensors slow down when the device is still.";
 "Disattivo" = "Off";
 "Display" = "Display";
@@ -566,7 +565,7 @@
 "Pausa lunga" = "Long break";
 "Pausa terminata" = "Break complete";
 "Pausa troppo lunga nell'invio Wi-Fi" = "Wi-Fi upload idle timeout";
-"Per revocare le chiavi anche sullo StopWatch apri iPhone Bluetooth → Rimuovi sul dispositivo. Poi dissocia StopWatch nelle impostazioni Bluetooth di iPhone." = "To revoke keys on StopWatch too, open iPhone Bluetooth → Remove on the device. Then forget StopWatch in iPhone Bluetooth settings.";
+"Per revocare le chiavi anche sullo StopWatch apri Sistema → iPhone → Rimuovi abbinamenti sul dispositivo. Poi dissocia StopWatch nelle impostazioni Bluetooth di iPhone." = "To revoke keys on StopWatch too, open System → iPhone → Remove pairings on the device. Then forget StopWatch in iPhone Bluetooth settings.";
 "Pizzica e trascina per inquadrare." = "Pinch and drag to crop.";
 "Playlist non disponibili" = "Playlists unavailable";
 "Poi torna qui per sceglierlo" = "Then return here to select it";
@@ -599,7 +598,6 @@
 "Preparazione…" = "Preparing…";
 "Preparo il microfono: attendi REC" = "Preparing microphone: wait for REC";
 "Preparo…" = "Preparing…";
-"Presentazioni" = "Presentations";
 "Presentazioni attive sul dispositivo" = "Presentation active on device";
 "Pressioni A / B: " = "A / B presses: ";
 "Pronta per le credenziali di prova" = "Ready for test credentials";
@@ -740,12 +738,11 @@
 "StopWatch" = "StopWatch";
 "StopWatch C152 · firmware personale" = "StopWatch C152 · community firmware";
 "StopWatch scollegato" = "StopWatch disconnected";
-"Strumenti" = "Tools";
+"StopWatch sta riposando." = "StopWatch is resting.";
 "Sul dispositivo" = "On device";
-"Sul dispositivo apri iPhone Bluetooth." = "Open iPhone Bluetooth on the device.";
+"Sul dispositivo apri Sistema → iPhone." = "On the device open System → iPhone.";
 "Suona" = "Play sound";
 "Suoni e vibrazione attivi" = "Sound and vibration on";
-"Tasca" = "Pocket";
 "Tasti Slide non validi" = "Invalid Slide keys";
 "Tastiera del computer" = "Computer keyboard";
 "Tasto non valido" = "Invalid key";
@@ -763,7 +760,7 @@
 "Timeout display" = "Display timeout";
 "Titolo" = "Title";
 "Titolo della nota" = "Note title";
-"Tocca Modifica per riordinare. L'ordine si applica all'interno di ogni gruppo: la prima app diventa quella grande. I gruppi vuoti vengono saltati; Sistema resta sempre accessibile." = "Tap Edit to reorder. Order applies within each group: the first app becomes the large one. Empty groups are skipped; System stays accessible.";
+"Tocca Modifica per riordinare. L'ordine è quello dell'anello sulla Home, in senso orario dall'alto. Sistema resta sempre accessibile." = "Tap Edit to reorder. The order follows the Home ring, clockwise from the top. System always stays accessible.";
 "Tocca lo schermo" = "Touch the screen";
 "Tocca per cambiare QR" = "Tap to switch QR";
 "Tocca per confermare" = "Tap to confirm";
@@ -791,6 +788,7 @@
 "URL Home Assistant non valido" = "Invalid Home Assistant URL";
 "USB collegata" = "USB connected";
 "USB occupata: riprova" = "USB busy: try again";
+"Ultima lettura" = "Last reading";
 "Ultima nota" = "Latest note";
 "Ultimo inoltro" = "Last forwarded request";
 "Ultimo inoltro riuscito" = "Last request succeeded";
@@ -806,7 +804,6 @@
 "Un'idea al volo." = "A quick idea.";
 "Un'idea.\nÈ già qui." = "An idea.\nAlready here.";
 "Una trascrizione è già in corso." = "A transcription is already in progress.";
-"Usa Pagina su / Pagina giù" = "Use Page Up / Page Down";
 "Usa i dati dell’iPhone" = "Use iPhone data";
 "Usa il broker già collegato a Home Assistant. La discovery MQTT crea automaticamente dispositivo, sensori e comandi. Svuota il broker per disattivare il collegamento. TCP senza TLS è adatto alla tua rete locale fidata." = "Use the broker already connected to Home Assistant. MQTT discovery automatically creates the device, sensors and controls. Clear the broker to disconnect. TCP without TLS is only suitable for a trusted local network.";
 "Usa stopwatch e il codice sul display" = "Use stopwatch and the code on the display";

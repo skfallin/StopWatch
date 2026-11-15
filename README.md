@@ -10,7 +10,8 @@ Community firmware for **M5Stack StopWatch C152**, with an iPhone companion and 
 
 - Clock faces, timer, stopwatch, Pomodoro and voice recording on the device.
 - Badge photos/GIFs, note downloads and on-device transcription with the iPhone app.
-- USB presentation remote; mouse and keyboard control from the paired iPhone.
+- USB mouse and keyboard control from the paired iPhone.
+- On battery the device rests when the screen turns off: radios pause until a button or touch wakes it, and it powers off after two idle hours.
 - English and Italian interfaces. New devices start in English and UTC. Existing saved configurations retain Italian and Rome time.
 
 Home Assistant, MQTT and Spotify are optional. They use your own installation and credentials. There is no project cloud service or shared account.
@@ -38,7 +39,7 @@ The USB FIDO2 security-key prototype is disabled in the normal build. The explic
 | [Development](docs/DEVELOPMENT.md) | Repeatable local and CI checks |
 | [Beta status](docs/STATUS.md) | Scope, limits and release checklist |
 | [Architecture](docs/ARCHITECTURE.md) | Modules, storage and transports |
-| [USB control](docs/USB_CONTROL.md) | Pointer, keyboard and presentation remote |
+| [USB control](docs/USB_CONTROL.md) | Pointer and keyboard from the iPhone |
 | [Navigation](docs/UI_NAVIGATION.md) | Touch and physical controls |
 | [Contributing](CONTRIBUTING.md) | Changes and bug reports |
 | [Security](SECURITY.md) | Credentials and vulnerability reporting |

@@ -166,8 +166,8 @@ int main() {
     screen=Screen::Light;lightDraft.value=65;
     InputEvents finish;finish.back=true;buttons(finish);assert(screen==Screen::LightConfirm);
     InputEvents leave;leave.home=true;buttons(leave);assert(screen==Screen::Home);
-    homeMenu.apps=true;showQuickPanel(true);InputEvents chord;chord.home=true;buttons(chord);
-    assert(!quickPanelOpen && !homeMenu.apps && screen==Screen::Home && !backCalls && !nextCalls);
+    homeMenu.selected=3;showQuickPanel(true);InputEvents chord;chord.home=true;buttons(chord);
+    assert(!quickPanelOpen && homeMenu.selected==3 && screen==Screen::Home && !backCalls && !nextCalls);
     showQuickPanel(true);quickPage=1;const int beforeBrightness=settings.brightness;
     handleTouch({ui::GestureKind::Drag,357,343,233,343});assert(quickPreview==255 && settings.brightness==beforeBrightness && M5.Display.level==255);
     handleTouch({ui::GestureKind::Release,357,343,233,343});assert(settings.brightness==255 && quietSavePending);
@@ -177,8 +177,8 @@ int main() {
     handleTouch({ui::GestureKind::HoldProgress,233,250,233,250,50});assert(casaHoldProgress==50);
     handleTouch({ui::GestureKind::Hold,233,250,233,250,100});assert(screen==Screen::Light && lightOpens==1 && casaHoldProgress==0);
     lightOpens=0;
-    screen=Screen::Home;homeMenu.space=1;homeMenu.selected=0;
-    handleTouch({ui::GestureKind::Up,233,170,233,300});assert(homeMenu.selected==1 && homeMenu.apps);
+    screen=Screen::Home;homeMenu.selected=0;
+    handleTouch({ui::GestureKind::Up,233,170,233,300});assert(homeMenu.selected==1);
     handleTouch({ui::GestureKind::Down,233,300,233,170});assert(homeMenu.selected==0);
     screen=Screen::HomeAssistant;dimmable=true;InputEvents hold;hold.back=true;buttons(hold);
     assert(screen==Screen::Light && lightOpens==1);

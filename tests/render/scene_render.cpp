@@ -63,33 +63,24 @@ int main(int argc,char** argv) {
     const auto frame=[&](const String& name,const std::function<void()>& draw) {
         output.open(root/(name+".jsonl"));draw();output.close();
     };
-    for(int space=0;space<3;++space) {
-        ui::HomeMenu menu;menu.space=space;
-        for(int selected=0;selected<menu.count();++selected) {
-            menu.selected=selected;
-            frame("scene-"+std::to_string(space)+"-"+std::to_string(selected),[&] { scene_ui::home(canvas,menu,180);drawStatus(); });
-        }
-    }
-    for(int group=0;group<3;++group) for(int direction:{-1,1}) {
-        ui::HomeMenu swipe;swipe.space=group;swipe.nextApp(direction);
+    ui::HomeMenu ring;
+    for(ring.selected=0;ring.selected<ring.count();++ring.selected)
+        frame("scene-"+std::to_string(ring.selected),[&] { scene_ui::home(canvas,ring,180);drawHomeClock(); });
+    for(int direction:{-1,1}) {
+        ui::HomeMenu swipe;swipe.nextApp(direction);
         for(int age:{0,90,179,180,220}) {
-            frame("home-swipe-"+std::to_string(group)+"-"+std::to_string(direction)+"-"+std::to_string(age),[&] { scene_ui::home(canvas,swipe,age);drawStatus(); });
+            frame("home-swipe-"+std::to_string(direction)+"-"+std::to_string(age),[&] { scene_ui::home(canvas,swipe,age);drawHomeClock(); });
         }
     }
-    ui::HomeMenu custom;std::array<int,launcher::appCount> order{7};custom.configure(order,1);
-    frame("home-only-system",[&] { scene_ui::home(canvas,custom,180);drawStatus(); });
+    ui::HomeMenu custom;std::array<int,launcher::appCount> order{launcher::system};custom.configure(order,1);
+    frame("home-only-system",[&] { scene_ui::home(canvas,custom,180);drawHomeClock(); });
     frame("system",[] { drawSystem(); });
     systemItem=2;frame("system-2",[] { drawSystem(); });
-    frame("settings",[] { drawSettingsMenu(); });
-    for(int section=0;section<3;++section) {
-        setting=ui::settingsItems[section][0];
-        frame("settings-section-"+std::to_string(section),[] { drawSettingsSection(); });
-    }
-    setting=2;frame("settings-audio-2",[] { drawSettingsSection(); });
+    systemItem=4;frame("system-4",[] { drawSystem(); });
     for(setting=0;setting<7;++setting) frame("slider-"+std::to_string(setting),[] { drawSettings(); });
     ui::HomeMenu menu;charging=true;
-    frame("charging",[&] { scene_ui::home(canvas,menu,180);drawStatus();scene_ui::notice(canvas,i18n::text("In carica"),std::string("82")+i18n::text("% · USB collegata"),ui::Icon::Charging); });
-    frame("notice",[&] { scene_ui::home(canvas,menu,180);drawStatus();scene_ui::notice(canvas,"Configurazione","salvata",ui::Icon::Activity); });
+    frame("charging",[&] { scene_ui::home(canvas,menu,180);drawHomeClock();scene_ui::notice(canvas,i18n::text("In carica"),std::string("82")+i18n::text("% · USB collegata"),ui::Icon::Charging); });
+    frame("notice",[&] { scene_ui::home(canvas,menu,180);drawHomeClock();scene_ui::notice(canvas,"Configurazione","salvata",ui::Icon::Activity); });
     for(int theme=0;theme<6;++theme) {
         ui::accent=ui::themes[theme].accent;ui::navigation=ui::themes[theme].navigation;
         ui::focus=ui::themes[theme].focus;surfaceColor=ui::focus;foregroundColor=ui::ink;
@@ -103,12 +94,7 @@ int main(int argc,char** argv) {
     for(int theme=1;theme<6;++theme) {
         ui::accent=ui::themes[theme].accent;ui::navigation=ui::themes[theme].navigation;
         ui::selectionSurface=ui::themes[theme].selectionSurface;
-        frame("scene-theme-"+std::to_string(theme),[&] { scene_ui::home(canvas,menu,180);drawStatus(); });
-        if(theme==1) {
-            menu.space=2;
-            frame("scene-buttons-tools",[&] { scene_ui::home(canvas,menu,180);drawStatus(); });
-            menu.space=1;
-        }
+        frame("scene-theme-"+std::to_string(theme),[&] { scene_ui::home(canvas,menu,180);drawHomeClock(); });
     }
     ui::accent=ui::themes[2].accent;ui::navigation=ui::themes[2].navigation;
     surfaceColor=ui::focus;foregroundColor=ui::ink;

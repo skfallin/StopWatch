@@ -6,7 +6,7 @@ Candidate: firmware **0.18.0-beta.1**, Companion **0.9.0 / build 22**, BLE proto
 
 ## Beta scope
 
-C152 only. English/Italian firmware, local portal and Companion; configurable device time zone; separate on-device transcription language; clock/timer/stopwatch/Focus, notes, Badge, USB Bridge/Slide and optional Home Assistant/Spotify. New configurations start English/UTC; existing stored configurations preserve Italian/Rome. Previous paired iPhone installations keep their Italian speech/keyboard defaults.
+C152 only. English/Italian firmware, local portal and Companion; configurable device time zone; separate on-device transcription language; clock/timer/stopwatch/Focus, notes, Badge, USB Bridge and optional Home Assistant/Spotify. New configurations start English/UTC; existing stored configurations preserve Italian/Rome. Previous paired iPhone installations keep their Italian speech/keyboard defaults.
 
 The normal build disables FIDO. `stopwatch-lab` is an explicit test-only variant. No Android client, App Store/TestFlight distribution, Companion OTA or generic iOS notifications are promised.
 
@@ -23,6 +23,14 @@ The normal build disables FIDO. `stopwatch-lab` is an explicit test-only variant
 - Working files and reachable local Git history passed the narrow high-confidence secret-pattern check. This is not an exhaustive audit of every possible secret or personal datum.
 
 No firmware was flashed, no account credentials were enrolled, no app was distributed and no repository visibility was changed as part of this preparation. No iOS simulator was running for an interactive visual check. Remote CI results for each pushed revision are available in [GitHub Actions](https://github.com/skfallin/StopWatch/actions); the local results above do not certify remote CI.
+
+## Update — 15 November 2026
+
+Changed: Home is a single ring of eight apps (Key and Slide left the launcher), System is one flat list, defaults are brightness 120 and a 20 s screen timeout, and on battery the device rests with the screen off (radios paused, power-off after two idle hours). Companion follows: eight apps, no presentation settings, labelled tabs, a pairing shortcut on the Bluetooth row, the last battery reading while the device rests, and no pairing error while waiting for a resting device.
+
+- C++/Python suite and **46 Swift tests** passed; unsigned iOS simulator build passed.
+- Companion first screen viewed in the simulator in preview mode (Italian), new and paired-but-resting states. Other tabs, Settings and large text sizes were not viewed.
+- The normal firmware was installed on one C152 by ordinary upload (no erase/uploadfs). Standby entry/exit, Bluetooth/Wi-Fi reconnection after a wake, power-off recovery and actual battery life are **not yet measured**.
 
 ## Before tagging/publishing
 
@@ -42,7 +50,8 @@ Use synthetic content and test accounts. Export important notes first.
 - [ ] Record/play a note, download via HTTPS and BLE, transcribe with supported English and Italian models; denied permission/model unavailable preserves audio.
 - [ ] Badge upload, cancellation, interrupted transfer and ordinary firmware update preserve the previous content.
 - [ ] Home Assistant actual-state confirmation and one Spotify action over direct Wi-Fi and the iPhone bridge, including locked iPhone.
-- [ ] USB Bridge US/Italian keyboard layouts, pointer, disconnect/suspend and Slide in a focused presentation application.
+- [ ] USB Bridge US/Italian keyboard layouts, pointer and disconnect/suspend.
+- [ ] Battery standby: rest after the screen timeout, wake by button/touch, Companion and Wi-Fi reconnect, power-off after two idle hours and power-on afterwards; compare battery life with the previous build.
 - [ ] Normal build has no functioning FIDO authenticator; LAB is tested only with disposable credentials and a fresh physical confirmation.
 
 ## Known limits

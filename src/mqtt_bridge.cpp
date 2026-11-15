@@ -381,5 +381,5 @@ void MqttBridge::update(bool screenOff) {
             stateDirty_ = true;
         }
     }
-    if (connected() && (stateDirty_ || uint32_t(millis() - lastState_) > (screenOff?60000u:15000u))) publishState();
+    if (connected() && (stateDirty_ || uint32_t(millis() - lastState_) > (screenOff?300000u:60000u))) publishState();
 }

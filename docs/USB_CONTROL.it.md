@@ -75,7 +75,9 @@ Test: layout, Unicode rifiutato senza invii parziali, pacchetto rapido, ordine, 
 Partizioni e dati non cambiano. La porta seriale può cambiare nome in modalità composita: rilevare nuovamente `/dev/cu.usbmodem*`. Il core supporta anche l’ingresso software in download aprendo CDC a 1200 baud, verificato sul dispositivo; se il comando di upload non lo attiva, usare alimentazione/reset. La modalità download ROM resta disponibile; non eseguire `erase` o `uploadfs` per aggiornare.
 
 
-## Slide — telecomando locale (0.17.0)
+## Slide — telecomando locale (0.17.0, storico)
+
+> Dalla 0.18.0-beta.1 Slide non è più nel launcher. Il testo seguente descrive il comportamento della 0.17.0.
 
 Slide usa il descrittore tastiera già presente, senza nuove interfacce USB o software sul computer. A/cerchio sinistro inviano sinistra (oppure Pagina su), B/cerchio destro inviano destra (oppure Pagina giù); Oscura / riprendi invia B. Ogni comando accoda pressione e rilascio, senza ripetizioni automatiche. Occorre avere il programma giusto in primo piano: il firmware non legge né conferma lo stato del computer.
 
